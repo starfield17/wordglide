@@ -1,4 +1,6 @@
 import json
+import hashlib
+import io
 from pathlib import Path
 import subprocess
 import sys
@@ -68,6 +70,27 @@ class PackagingTests(unittest.TestCase):
                 tar.addfile(member)
             with self.assertRaises(ValueError):
                 validate_data_archive(archive)
+
+    def test_data_archive_rejects_special_permissions_even_with_valid_hashes(self):
+        from package import validate_data_archive
+        payload = b"format fixture"
+        files = {name: payload for name in ("entries.sqlite", "words.fst", "candidates.json")}
+        files["manifest.json"] = json.dumps({"schema_version": 1, "candidate_count": 1,
+            "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}).encode()
+        files["THIRD_PARTY.md"] = b"attribution fixture"
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "data.tar.gz"
+            for mode in (0o644, 0o4777):
+                with tarfile.open(archive, "w:gz") as tar:
+                    for name, data in files.items():
+                        member = tarfile.TarInfo("english-pack/" + name)
+                        member.mode, member.size = mode, len(data)
+                        tar.addfile(member, io.BytesIO(data))
+                if mode == 0o644:
+                    self.assertEqual(validate_data_archive(archive)["candidate_count"], 1)
+                else:
+                    with self.assertRaises(ValueError):
+                        validate_data_archive(archive)
 
 
 if __name__ == "__main__":
