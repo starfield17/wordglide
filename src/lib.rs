@@ -12,6 +12,7 @@ mod index;
 mod model;
 mod normalize;
 mod store;
+mod theme;
 mod ui;
 
 pub use app::{App, Focus};

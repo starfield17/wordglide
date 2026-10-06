@@ -18,6 +18,9 @@ struct Args {
     /// Verify all data checksums, indexes, and database integrity, then exit.
     #[arg(long, conflicts_with = "query")]
     verify_data: bool,
+    /// Disable colored output.
+    #[arg(long)]
+    no_color: bool,
 }
 
 fn main() -> Result<()> {
@@ -32,7 +35,19 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let dict = Dictionary::open(&path)?;
-    run(dict, args.query.as_deref().unwrap_or(""))
+    let color = color_enabled(args.no_color);
+    run(dict, args.query.as_deref().unwrap_or(""), color)
+}
+
+fn color_enabled(no_color_flag: bool) -> bool {
+    color_enabled_from(no_color_flag, std::env::var_os("NO_COLOR").as_deref())
+}
+
+fn color_enabled_from(no_color_flag: bool, no_color_env: Option<&std::ffi::OsStr>) -> bool {
+    if no_color_flag {
+        return false;
+    }
+    !matches!(no_color_env, Some(val) if !val.is_empty())
 }
 
 fn resolve_data(
@@ -94,5 +109,22 @@ mod tests {
                 adjacent
             );
         }
+    }
+
+    #[test]
+    fn color_enabled_precedence_and_env() {
+        use std::ffi::OsStr;
+        // When neither flag nor env is set: color enabled.
+        assert!(color_enabled_from(false, None));
+        // Empty NO_COLOR env: color enabled.
+        assert!(color_enabled_from(false, Some(OsStr::new(""))));
+        // Non-empty NO_COLOR env: color disabled.
+        assert!(!color_enabled_from(false, Some(OsStr::new("1"))));
+        assert!(!color_enabled_from(false, Some(OsStr::new("0"))));
+        assert!(!color_enabled_from(false, Some(OsStr::new("true"))));
+        // --no-color flag set: color disabled regardless of env.
+        assert!(!color_enabled_from(true, None));
+        assert!(!color_enabled_from(true, Some(OsStr::new(""))));
+        assert!(!color_enabled_from(true, Some(OsStr::new("1"))));
     }
 }

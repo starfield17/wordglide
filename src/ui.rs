@@ -1,4 +1,4 @@
-use crate::{App, Dictionary, Entry, Focus, MatchKind};
+use crate::{App, Dictionary, Entry, Focus, MatchKind, theme::Theme};
 use anyhow::Result;
 use crossterm::{
     Command,
@@ -13,15 +13,13 @@ use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 use std::{collections::HashMap, fmt, io, time::Duration};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-const ACCENT: Color = Color::Cyan;
 
 /// Lines moved per wheel notch. Terminals send one event per notch, so this
 /// stays small enough to feel continuous.
@@ -141,11 +139,11 @@ impl Pointer {
     }
 }
 
-fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool) {
+fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool, theme: Theme) {
     if related {
         lines.push(ReadingLine {
             text: format!("→ {}", entry.headword),
-            style: Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+            style: theme.heading(),
         });
     }
     // Partition across groups as well as within each group: historical-only groups come last.
@@ -171,7 +169,7 @@ fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool) {
                         ""
                     }
                 ),
-                style: Style::default().fg(ACCENT).add_modifier(Modifier::BOLD),
+                style: theme.heading(),
             });
             for (i, sense) in senses.iter().enumerate() {
                 let tags = if sense.tags.is_empty() {
@@ -186,14 +184,12 @@ fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool) {
                 for example in &sense.examples {
                     lines.push(ReadingLine {
                         text: format!("   • {}", example.text),
-                        style: Style::default()
-                            .fg(Color::Gray)
-                            .add_modifier(Modifier::ITALIC),
+                        style: theme.example(),
                     });
                     if !example.reference.is_empty() {
                         lines.push(ReadingLine {
                             text: format!("     — {}", example.reference),
-                            style: Style::default().fg(Color::DarkGray),
+                            style: theme.dim(),
                         });
                     }
                 }
@@ -211,7 +207,7 @@ fn reading_lines(app: &App) -> Vec<ReadingLine> {
     if let Some(error) = &app.error {
         lines.push(ReadingLine {
             text: error.clone(),
-            style: Style::default().fg(Color::Red),
+            style: app.theme.error(),
         });
         return lines;
     }
@@ -225,7 +221,7 @@ fn reading_lines(app: &App) -> Vec<ReadingLine> {
         };
         return vec![ReadingLine {
             text: text.into(),
-            style: Style::default().fg(Color::DarkGray),
+            style: app.theme.dim(),
         }];
     };
     if !preview.related.is_empty() {
@@ -237,20 +233,20 @@ fn reading_lines(app: &App) -> Vec<ReadingLine> {
             .join(", ");
         lines.push(ReadingLine {
             text: format!("{} → {} (word form)", preview.entry.headword, relations),
-            style: Style::default().fg(ACCENT),
+            style: app.theme.accent(),
         });
         for related in &preview.related {
-            append_entry(&mut lines, related, true);
+            append_entry(&mut lines, related, true, app.theme);
         }
         lines.push(ReadingLine {
             text: format!("Original form: {}", preview.entry.headword),
-            style: Style::default().fg(Color::DarkGray),
+            style: app.theme.dim(),
         });
     }
-    append_entry(&mut lines, &preview.entry, false);
+    append_entry(&mut lines, &preview.entry, false, app.theme);
     lines.push(ReadingLine {
         text: format!("Source: {}", preview.entry.source_url),
-        style: Style::default().fg(Color::DarkGray),
+        style: app.theme.dim(),
     });
     lines
 }
@@ -314,7 +310,7 @@ fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
     result
 }
 
-fn label_line(line: &ReadingLine, map: &HashMap<String, String>) -> Line<'static> {
+fn label_line(line: &ReadingLine, map: &HashMap<String, String>, theme: Theme) -> Line<'static> {
     let mut spans = vec![];
     for token in line.text.split_word_bounds() {
         if let Some(label) = map.get(&crate::normalize(token)) {
@@ -322,13 +318,7 @@ fn label_line(line: &ReadingLine, map: &HashMap<String, String>) -> Line<'static
             let graphemes: Vec<_> = token.graphemes(true).collect();
             let count = graphemes.len().min(2);
             let hint = label.chars().take(count).collect::<String>();
-            spans.push(Span::styled(
-                hint,
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            spans.push(Span::styled(hint, theme.hint_label()));
             spans.push(Span::styled(graphemes[count..].concat(), line.style));
         } else {
             spans.push(Span::styled(token.to_string(), line.style));
@@ -364,11 +354,7 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     let input_block = Block::default()
         .borders(Borders::ALL)
         .title(" Wordglide · English ")
-        .border_style(Style::default().fg(if app.focus == Focus::Input {
-            ACCENT
-        } else {
-            Color::DarkGray
-        }));
+        .border_style(app.theme.border(app.focus == Focus::Input));
     let available = rows[0].width.saturating_sub(3) as usize;
     let before = &app.input[..app.cursor];
     let mut start = 0;
@@ -378,10 +364,7 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::raw(app.input[start..].to_string()),
-            Span::styled(
-                app.inline_suffix().unwrap_or_default(),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(app.inline_suffix().unwrap_or_default(), app.theme.dim()),
         ]))
         .block(input_block),
         rows[0],
@@ -408,7 +391,7 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     render_definition(frame, app, panes[1], pointer);
     let help_lines = footer_help(app, rows[2].width as usize, rows[2].height as usize);
     frame.render_widget(
-        Paragraph::new(help_lines.join("\n")).style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(help_lines.join("\n")).style(app.theme.dim()),
         rows[2],
     );
 }
@@ -728,11 +711,11 @@ fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Poi
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" Candidates · {} ", app.results.len()))
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(app.theme.idle_border());
     let inner = block.inner(area);
     let list = List::new(items)
         .block(block)
-        .highlight_style(Style::default().fg(Color::Black).bg(ACCENT))
+        .highlight_style(app.theme.selected())
         .highlight_symbol("› ");
     let mut state = ListState::default();
     if !app.results.is_empty() {
@@ -750,11 +733,7 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Definition ")
-        .border_style(Style::default().fg(if app.focus == Focus::Definition {
-            ACCENT
-        } else {
-            Color::DarkGray
-        }));
+        .border_style(app.theme.border(app.focus == Focus::Definition));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     // A page keeps one line of overlap so no definition line is skipped.
@@ -796,7 +775,7 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut
         .iter()
         .map(|l| {
             if app.picking {
-                label_line(l, &map)
+                label_line(l, &map, app.theme)
             } else {
                 Line::styled(l.text.clone(), l.style)
             }
@@ -891,8 +870,9 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn run(dictionary: Dictionary, query: &str) -> Result<()> {
+pub fn run(dictionary: Dictionary, query: &str, color: bool) -> Result<()> {
     let mut app = App::new(dictionary, query);
+    app.set_color(color);
     let old_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();

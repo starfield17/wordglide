@@ -1,4 +1,4 @@
-use crate::{Candidate, Dictionary, Preview, index::Index, normalize};
+use crate::{Candidate, Dictionary, Preview, index::Index, normalize, theme::Theme};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::{
     collections::VecDeque,
@@ -57,6 +57,7 @@ pub struct App {
     pub exit: bool,
     pub(crate) max_scroll: usize,
     pub(crate) page: usize,
+    pub(crate) theme: Theme,
     lexicon: Arc<Index>,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
@@ -118,6 +119,7 @@ impl App {
             exit: false,
             max_scroll: 0,
             page: 10,
+            theme: Theme::colored(),
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -129,6 +131,20 @@ impl App {
         };
         app.search();
         app
+    }
+
+    /// Select the colored or color-free rendering theme.
+    pub fn set_color(&mut self, color: bool) {
+        self.theme = if color {
+            Theme::colored()
+        } else {
+            Theme::plain()
+        };
+    }
+
+    /// Render without color; equivalent to `set_color(false)`.
+    pub fn set_plain(&mut self) {
+        self.set_color(false);
     }
 
     pub fn history_len(&self) -> usize {
