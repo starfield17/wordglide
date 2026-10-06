@@ -227,10 +227,18 @@ fn same_length_database_content_damage_is_detected_by_explicit_verification() {
 fn damaged_fst_nodes_fail_open_without_a_query_panic() {
     let (dir, _dict) = pack();
     let file = dir.path().join("pack/words.fst");
-    let mut bytes = fs::read(&file).unwrap();
-    let root = u64::from_le_bytes(bytes[bytes.len()-12..bytes.len()-4].try_into().unwrap()) as usize;
-    bytes[root] = 63;
-    bytes[root-1] = 255;
-    fs::write(file, bytes).unwrap();
-    assert!(Dictionary::open(&dir.path().join("pack")).is_err());
+    let original = fs::read(&file).unwrap();
+    for damage in ["node", "footer"] {
+        let mut bytes = original.clone();
+        let footer = bytes.len() - 12;
+        if damage == "node" {
+            let root = u64::from_le_bytes(bytes[footer..footer+8].try_into().unwrap()) as usize;
+            bytes[root] = 63;
+            bytes[root-1] = 255;
+        } else {
+            bytes[footer..footer+8].copy_from_slice(&u64::MAX.to_le_bytes());
+        }
+        fs::write(&file, bytes).unwrap();
+        assert!(Dictionary::open(&dir.path().join("pack")).is_err());
+    }
 }
