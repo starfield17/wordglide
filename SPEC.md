@@ -35,6 +35,9 @@ active the same keys and the wheel still scroll, and the hints are rebuilt for
 the newly visible lines. Editing shortcuts (Ctrl+U/A/E/F) act only while the
 input has focus; in the definition they are ignored and Ctrl+U does not clear
 the query.
+History: Ctrl+Z steps back through followed words and Ctrl+Y steps forward
+again. A new lookup or follow clears the forward steps so redo never restores a
+replaced state. History is session-only and capped in both directions.
 Distribution: public Wordglide repository; three download types (program, shared
 data, combined bundle). Adjacent english-pack auto-discovery precedes existing
 user-data directory; explicit --data wins. Runtime never downloads data.

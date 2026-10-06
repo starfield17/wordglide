@@ -212,3 +212,59 @@ fn smallest_supported_terminal_has_definition_and_resize_clamps_scroll() {
     let mut wide = Terminal::new(TestBackend::new(120, 40)).unwrap();
     wide.draw(|frame| draw(frame, &mut app)).unwrap();
 }
+
+#[test]
+fn ctrl_z_and_ctrl_y_walk_follow_history_both_ways() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fist");
+    settle(&mut app);
+
+    app.jump_to("hand");
+    settle(&mut app);
+    app.jump_to("palm");
+    settle(&mut app);
+    assert_eq!(app.input, "palm");
+    assert_eq!(app.history_len(), 2);
+
+    control(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.input, "hand", "Ctrl+Z steps back one followed word");
+    control(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.input, "fist");
+    assert_eq!(app.history_len(), 0);
+
+    control(&mut app, KeyCode::Char('y'));
+    settle(&mut app);
+    assert_eq!(app.input, "hand", "Ctrl+Y undoes the last back");
+    control(&mut app, KeyCode::Char('y'));
+    settle(&mut app);
+    assert_eq!(app.input, "palm");
+    assert_eq!(app.history_len(), 2);
+
+    control(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.input, "palm", "nothing ahead to restore");
+}
+
+#[test]
+fn new_navigation_and_typing_clear_the_forward_stack() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fist");
+    settle(&mut app);
+    app.jump_to("hand");
+    settle(&mut app);
+    app.jump_to("palm");
+    settle(&mut app);
+
+    app.back();
+    app.back();
+    assert_eq!(app.input, "fist");
+    app.jump_to("house");
+    settle(&mut app);
+    app.forward();
+    assert_eq!(app.input, "house", "a follow drops the replaced states");
+
+    app.back();
+    assert_eq!(app.input, "fist");
+    key(&mut app, KeyCode::Char('x'));
+    app.forward();
+    assert_eq!(app.input, "fistx", "editing drops the replaced states");
+}

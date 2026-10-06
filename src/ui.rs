@@ -413,13 +413,13 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
         )
     } else if app.focus == Focus::Definition {
         format!(
-            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input\nCtrl+L focus · Ctrl+O back ({}) · Ctrl+C quit{}",
+            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input\nCtrl+L focus · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+C quit{}",
             app.history_len(),
             if app.loading { " · loading…" } else { "" }
         )
     } else {
         format!(
-            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll\nf follow · Ctrl+O back ({}) · Ctrl+U new · Ctrl+C quit{}",
+            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll\nf follow · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+U new · Ctrl+C quit{}",
             app.history_len(),
             if app.loading { " · loading…" } else { "" }
         )

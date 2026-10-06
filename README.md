@@ -113,7 +113,8 @@ replaced with a newly built or downloaded pack.
 | Click the highlighted candidate again | Accept it and focus the definition |
 | Click in the input box | Return focus to the input, without moving the cursor |
 | Esc | Undo active completion, cancel hints, or return input focus |
-| Ctrl+O | Return to previous query, selection, focus, and scroll |
+| Ctrl+Z | Return to the previous query, selection, focus, and scroll |
+| Ctrl+Y | Go forward again after going back |
 | Ctrl+U | Clear input for another lookup |
 | Ctrl+C | Exit |
 | ← / →, Home / End, Ctrl+A / Ctrl+E | Edit input position |
@@ -134,8 +135,10 @@ persistent history or personalize ranking.
 
 Hints highlight the first two letters of a visible word and do not shift the
 text. Only words present in the local pack receive hints; one-letter tokens do
-not. Navigation history lives only in the current session. Narrow terminals use
-stacked panes; the minimum usable size is 30×10.
+not. Navigation history lives in the current session: `Ctrl+Z` steps
+back through followed words and `Ctrl+Y` steps forward again; a new lookup or
+follow clears the forward steps. Narrow terminals use stacked panes; the minimum
+usable size is 30×10.
 
 Mouse works in two steps: the first click inside the definition pane focuses it,
 and clicking a visible word there follows it like a hint. Clicking the input box
@@ -143,7 +146,7 @@ returns focus without moving the cursor, and the wheel scrolls the definition
 from any focus. A click on a candidate selects and previews it without moving
 the focus; clicking the highlighted candidate again accepts it, like Enter.
 Only words present in the local pack respond, and the jump
-reuses the same session history as `Ctrl+O`. Reporting is limited to presses and
+reuses the same session history as `Ctrl+Z`. Reporting is limited to presses and
 the wheel, so pointer motion is never sent; terminals that still route
 drag-selection to the application need their bypass key (usually Shift) for
 native copy.

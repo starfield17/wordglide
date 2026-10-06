@@ -6,6 +6,9 @@ use std::{
     thread,
 };
 
+/// Cap on remembered navigation steps in either direction.
+const HISTORY_LIMIT: usize = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Input,
@@ -56,6 +59,7 @@ pub struct App {
     pub(crate) page: usize,
     lexicon: Arc<Index>,
     history: VecDeque<Location>,
+    forward: VecDeque<Location>,
     generation: u64,
     request: mpsc::Sender<Request>,
     response: mpsc::Receiver<Response>,
@@ -116,6 +120,7 @@ impl App {
             page: 10,
             lexicon,
             history: VecDeque::new(),
+            forward: VecDeque::new(),
             generation: 0,
             request: tx,
             response: rx,
@@ -150,6 +155,8 @@ impl App {
     fn search(&mut self) {
         self.completion = None;
         self.pending_completion.clear();
+        // Any new lookup branches away from the states reached by going back.
+        self.forward.clear();
         self.generation += 1;
         self.selected = 0;
         self.scroll = 0;
@@ -265,7 +272,7 @@ impl App {
             return;
         }
         self.history.push_back(self.location());
-        if self.history.len() > 64 {
+        if self.history.len() > HISTORY_LIMIT {
             self.history.pop_front();
         }
         self.input = normalize(word);
@@ -291,7 +298,24 @@ impl App {
         let Some(old) = self.history.pop_back() else {
             return;
         };
+        self.forward.push_back(self.location());
+        if self.forward.len() > HISTORY_LIMIT {
+            self.forward.pop_front();
+        }
         self.restore(old);
+    }
+
+    /// Undo the last `back` and return to the word left behind. A new lookup or
+    /// follow clears this forward stack.
+    pub fn forward(&mut self) {
+        let Some(next) = self.forward.pop_back() else {
+            return;
+        };
+        self.history.push_back(self.location());
+        if self.history.len() > HISTORY_LIMIT {
+            self.history.pop_front();
+        }
+        self.restore(next);
     }
 
     fn restore(&mut self, old: Location) {
@@ -442,7 +466,8 @@ impl App {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') => self.exit = true,
-                KeyCode::Char('o') => self.back(),
+                KeyCode::Char('z') => self.back(),
+                KeyCode::Char('y') => self.forward(),
                 KeyCode::Char('u') if self.focus == Focus::Input => {
                     self.input.clear();
                     self.cursor = 0;
