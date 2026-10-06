@@ -83,7 +83,7 @@ fn corrupt_or_incompatible_packs_are_rejected() {
 #[test]
 fn checksum_damage_and_unreadable_canonical_entries_are_rejected() {
     let (dir, _dict) = pack();
-    fs::write(dir.path().join("pack/candidates.json"), "[]").unwrap();
+    fs::write(dir.path().join("pack/lexicon.bin"), "[]").unwrap();
     assert!(
         Dictionary::open(&dir.path().join("pack"))
             .err()
@@ -107,4 +107,49 @@ fn checksum_damage_and_unreadable_canonical_entries_are_rejected() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn lightweight_open_and_explicit_verification_are_separate() {
+    let (dir, _dict) = pack();
+    let path = dir.path().join("pack");
+    local_english_dict::verify_pack(&path).unwrap();
+    let file = path.join("manifest.json");
+    let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(manifest["schema_version"], 2);
+    manifest["files"]["entries.sqlite"] = "0".repeat(64).into();
+    fs::write(file, manifest.to_string()).unwrap();
+    assert!(Dictionary::open(&path).is_ok(), "normal open must not scan payload checksums");
+    assert!(local_english_dict::verify_pack(&path).is_err());
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_wordglide"))
+        .args(["--verify-data", "--data"]).arg(&path).output().unwrap();
+    assert!(!output.status.success());
+    assert!(!output.stdout.windows(8).any(|w| w == b"\x1b[?1049h"));
+}
+
+#[test]
+fn verification_cli_exits_without_a_terminal_and_schema_is_checked() {
+    let (dir, _dict) = pack();
+    let path = dir.path().join("pack");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_wordglide"))
+        .args(["--verify-data", "--data"]).arg(&path).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("verified"));
+    let conn = rusqlite::Connection::open(path.join("entries.sqlite")).unwrap();
+    conn.execute_batch("ALTER TABLE entries RENAME TO wrong_table").unwrap();
+    assert!(Dictionary::open(&path).is_err());
+}
+
+#[test]
+fn invalid_record_offsets_return_errors_instead_of_panicking() {
+    let (dir, _dict) = pack();
+    let path = dir.path().join("pack");
+    let file = path.join("lexicon.bin");
+    let mut bytes = fs::read(&file).unwrap();
+    // Fixed 32-byte header, then 20-byte candidate records: first key offset.
+    bytes[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
+    fs::write(file, bytes).unwrap();
+    let mut dict = Dictionary::open(&path).unwrap();
+    assert!(dict.search("better").is_err());
+    assert!(local_english_dict::verify_pack(&path).is_err());
 }

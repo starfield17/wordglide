@@ -16,11 +16,11 @@ class PackagingTests(unittest.TestCase):
             root = Path(directory)
             pack = root / "pack"
             pack.mkdir()
-            for name in ("entries.sqlite", "words.fst", "candidates.json"):
+            for name in ("entries.sqlite", "words.fst", "lexicon.bin"):
                 (pack / name).write_bytes(b"format fixture")
-            manifest = {"schema_version": 1, "candidate_count": 1,
+            manifest = {"schema_version": 2, "candidate_count": 1,
                         "files": {name: checksum(pack / name) for name in
-                                  ("entries.sqlite", "words.fst", "candidates.json")}}
+                                  ("entries.sqlite", "words.fst", "lexicon.bin")}}
             (pack / "manifest.json").write_text(json.dumps(manifest))
             binaries = root / "binaries"
             binaries.mkdir()
@@ -74,8 +74,8 @@ class PackagingTests(unittest.TestCase):
     def test_data_archive_rejects_special_permissions_even_with_valid_hashes(self):
         from package import validate_data_archive
         payload = b"format fixture"
-        files = {name: payload for name in ("entries.sqlite", "words.fst", "candidates.json")}
-        files["manifest.json"] = json.dumps({"schema_version": 1, "candidate_count": 1,
+        files = {name: payload for name in ("entries.sqlite", "words.fst", "lexicon.bin")}
+        files["manifest.json"] = json.dumps({"schema_version": 2, "candidate_count": 1,
             "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}).encode()
         files["THIRD_PARTY.md"] = b"attribution fixture"
         with tempfile.TemporaryDirectory() as directory:
