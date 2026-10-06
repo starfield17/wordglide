@@ -1,0 +1,82 @@
+{
+  "entries": 89,
+  "groups": 289,
+  "raw_records": 289,
+  "rejected_records": 0,
+  "rejection_samples": [],
+  "senses": 2274,
+  "senses_with_examples": 1768,
+  "senses_with_ipa": 2211,
+  "unresolved_form_targets": 6,
+  "samples": {
+    "better": {
+      "senses": 12,
+      "lemmas": [
+        "good",
+        "well"
+      ],
+      "first_gloss": [
+        "comparative degree of good and well"
+      ],
+      "senses_with_examples": 10
+    },
+    "bubble": {
+      "senses": 35,
+      "lemmas": [],
+      "first_gloss": [
+        "A spherically contained volume of air or other gas in a liquid, commonly a soapy liquid."
+      ],
+      "senses_with_examples": 21
+    },
+    "fist": {
+      "senses": 15,
+      "lemmas": [],
+      "first_gloss": [
+        "A hand with the fingers clenched or curled inward."
+      ],
+      "senses_with_examples": 6
+    },
+    "house": {
+      "senses": 36,
+      "lemmas": [],
+      "first_gloss": [
+        "A structure built or serving as an abode of human beings."
+      ],
+      "senses_with_examples": 25
+    },
+    "set": {
+      "senses": 97,
+      "lemmas": [],
+      "first_gloss": [
+        "To put (something) down, to rest."
+      ],
+      "senses_with_examples": 60
+    },
+    "take": {
+      "senses": 102,
+      "lemmas": [],
+      "first_gloss": [
+        "To get into one's hands, possession, or control, with or without force."
+      ],
+      "senses_with_examples": 96
+    },
+    "take off": {
+      "senses": 12,
+      "lemmas": [],
+      "first_gloss": [
+        "To remove."
+      ],
+      "senses_with_examples": 10
+    },
+    "went": {
+      "senses": 4,
+      "lemmas": [
+        "go"
+      ],
+      "first_gloss": [
+        "simple past of go"
+      ],
+      "senses_with_examples": 2
+    }
+  }
+}

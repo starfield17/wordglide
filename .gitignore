@@ -1,0 +1,7 @@
+/target/
+/data/
+/dist/
+/artifacts/
+/tuidict/
+__pycache__/
+.DS_Store

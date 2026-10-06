@@ -1,0 +1,32 @@
+name: Check
+on: [push, pull_request]
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: make check PYTHON=python3
+      - name: Build release executables
+        shell: bash
+        run: |
+          dict_sysroot="$(rustc --print sysroot)"
+          RUSTFLAGS="--remap-path-prefix=$HOME=dependencies --remap-path-prefix=$PWD=workspace --remap-path-prefix=$dict_sysroot=toolchain" cargo build --release --bins
+      - run: |
+          ./target/release/dict-build --input examples/sample/entries.jsonl --source examples/sample/source.json --output data/ci-sample
+          python3 scripts/terminal_smoke.py --data data/ci-sample
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dict-${{ matrix.os }}
+          path: |
+            target/release/dict
+            target/release/dict-build
+            target/release/dict-bench

@@ -1,0 +1,114 @@
+{
+  "source": "English Wiktionary via raw Wiktextract/Kaikki",
+  "source_url": "https://kaikki.org/dictionary/rawdata.html",
+  "snapshot": "2026-09-02-sampled-2026-10-06",
+  "input_sha256": "dcad46204c36ad4c2967a94cff6dea689dfa9f17ed3013cf628761592954f941",
+  "ranking": "100*zipf-2*chars-100*extra_words;exact>inflection>prefix>fuzzy;key_tie",
+  "quality_report": {
+    "entries": 89,
+    "groups": 289,
+    "raw_records": 289,
+    "rejected_records": 0,
+    "rejection_samples": [],
+    "senses": 2274,
+    "senses_with_examples": 1768,
+    "senses_with_ipa": 2211,
+    "unresolved_form_targets": 6,
+    "samples": {
+      "better": {
+        "senses": 12,
+        "lemmas": [
+          "good",
+          "well"
+        ],
+        "first_gloss": [
+          "comparative degree of good and well"
+        ],
+        "senses_with_examples": 10
+      },
+      "bubble": {
+        "senses": 35,
+        "lemmas": [],
+        "first_gloss": [
+          "A spherically contained volume of air or other gas in a liquid, commonly a soapy liquid."
+        ],
+        "senses_with_examples": 21
+      },
+      "fist": {
+        "senses": 15,
+        "lemmas": [],
+        "first_gloss": [
+          "A hand with the fingers clenched or curled inward."
+        ],
+        "senses_with_examples": 6
+      },
+      "house": {
+        "senses": 36,
+        "lemmas": [],
+        "first_gloss": [
+          "A structure built or serving as an abode of human beings."
+        ],
+        "senses_with_examples": 25
+      },
+      "set": {
+        "senses": 97,
+        "lemmas": [],
+        "first_gloss": [
+          "To put (something) down, to rest."
+        ],
+        "senses_with_examples": 60
+      },
+      "take": {
+        "senses": 102,
+        "lemmas": [],
+        "first_gloss": [
+          "To get into one's hands, possession, or control, with or without force."
+        ],
+        "senses_with_examples": 96
+      },
+      "take off": {
+        "senses": 12,
+        "lemmas": [],
+        "first_gloss": [
+          "To remove."
+        ],
+        "senses_with_examples": 10
+      },
+      "went": {
+        "senses": 4,
+        "lemmas": [
+          "go"
+        ],
+        "first_gloss": [
+          "simple past of go"
+        ],
+        "senses_with_examples": 2
+      }
+    }
+  },
+  "wordfreq_version": "3.1.1",
+  "wordfreq_notices": {
+    "wordfreq-3.1.1.dist-info/LICENSE.txt": "Copyright 2022 Robyn Speer\n\nLicensed under the Apache License, Version 2.0 (the \"License\");\nyou may not use this file except in compliance with the License.\nYou may obtain a copy of the License at\n\n    http://www.apache.org/licenses/LICENSE-2.0\n\nUnless required by applicable law or agreed to in writing, software\ndistributed under the License is distributed on an \"AS IS\" BASIS,\nWITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\nSee the License for the specific language governing permissions and\nlimitations under the License.\n"
+  },
+  "licenses": [
+    {
+      "data": "Wiktionary definitions and usage examples",
+      "license": "CC BY-SA 4.0",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "attribution": "Wiktionary contributors; per-entry source URL links to attribution history",
+      "terms": "https://en.wiktionary.org/wiki/Wiktionary:Copyrights"
+    },
+    {
+      "data": "wordfreq frequency data",
+      "license": "CC BY-SA 4.0",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "attribution": "Robyn Speer; Marc Brysbaert et al. (SUBTLEX), OPUS OpenSubtitles and other sources; see embedded upstream notices"
+    }
+  ],
+  "limitations": [
+    "Example and pronunciation coverage is incomplete.",
+    "Definitions are source text, not rewritten learner definitions.",
+    "Quotations retain source references; original authors' rights may differ.",
+    "Multiword frequency is estimated; wordfreq is a roughly pre-2022 usage snapshot."
+  ]
+}
