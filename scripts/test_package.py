@@ -19,6 +19,8 @@ class PackagingTests(unittest.TestCase):
             for name in ("entries.sqlite", "words.fst", "lexicon.bin"):
                 (pack / name).write_bytes(b"format fixture")
             manifest = {"schema_version": 2, "candidate_count": 1,
+                        "sizes": {name: (pack / name).stat().st_size for name in
+                                  ("entries.sqlite", "words.fst", "lexicon.bin")},
                         "files": {name: checksum(pack / name) for name in
                                   ("entries.sqlite", "words.fst", "lexicon.bin")}}
             (pack / "manifest.json").write_text(json.dumps(manifest))
@@ -76,7 +78,8 @@ class PackagingTests(unittest.TestCase):
         payload = b"format fixture"
         files = {name: payload for name in ("entries.sqlite", "words.fst", "lexicon.bin")}
         files["manifest.json"] = json.dumps({"schema_version": 2, "candidate_count": 1,
-            "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}).encode()
+            "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
+            "sizes": {name: len(data) for name, data in files.items()}}).encode()
         files["THIRD_PARTY.md"] = b"attribution fixture"
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "data.tar.gz"
