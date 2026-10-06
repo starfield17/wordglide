@@ -24,6 +24,23 @@ pub struct Dictionary {
     cache_bytes: usize,
 }
 
+/// Cheap, shareable handle to the read-only index. Lets the frontend answer
+/// exact/prefix questions without naming the compact index internals.
+#[derive(Clone)]
+pub(crate) struct Lexicon {
+    index: Arc<Index>,
+}
+
+impl Lexicon {
+    pub(crate) fn contains(&self, word: &str) -> bool {
+        self.index.exact(&normalize(word)).is_some()
+    }
+
+    pub(crate) fn common_prefix(&self, query: &str) -> Result<Option<String>> {
+        self.index.common_prefix(query)
+    }
+}
+
 impl Dictionary {
     /// Open with lightweight structural checks. Use `verify_pack` for full integrity verification.
     pub fn open(path: &Path) -> Result<Self> {
@@ -98,8 +115,10 @@ impl Dictionary {
         self.index.len()
     }
 
-    pub(crate) fn lexicon(&self) -> Arc<Index> {
-        Arc::clone(&self.index)
+    pub(crate) fn lexicon(&self) -> Lexicon {
+        Lexicon {
+            index: Arc::clone(&self.index),
+        }
     }
 
     pub fn contains(&self, word: &str) -> bool {

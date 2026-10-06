@@ -4,12 +4,9 @@ mod keys;
 mod view;
 mod worker;
 
-use crate::{Candidate, Dictionary, Preview, index::Index, normalize, theme::Theme};
+use crate::{Candidate, Dictionary, Preview, normalize, store::Lexicon, theme::Theme};
 use crossterm::event::KeyEvent;
-use std::{
-    collections::VecDeque,
-    sync::{Arc, mpsc},
-};
+use std::{collections::VecDeque, sync::mpsc};
 
 use completion::Completion;
 pub(crate) use view::ViewOptions;
@@ -54,7 +51,7 @@ pub struct App {
     pub(crate) page: usize,
     pub(crate) theme: Theme,
     pub(crate) view: ViewOptions,
-    lexicon: Arc<Index>,
+    lexicon: Lexicon,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
     generation: u64,
@@ -118,7 +115,7 @@ impl App {
     }
 
     pub fn contains(&self, word: &str) -> bool {
-        self.lexicon.exact(&normalize(word)).is_some()
+        self.lexicon.contains(word)
     }
 
     /// Move the reading position by `lines` relative to the current offset,

@@ -14,7 +14,9 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `src/lib.rs`: public contract; private modules enforce internal visibility.
 - `src/index.rs`: compact lexicon codec, prebuilt ranking, prefix top-k, fuzzy queries.
 - `src/store.rs`, `src/build.rs`: lightweight open, explicit full verification, pack assembly.
-- `src/app.rs`, `src/ui.rs`: navigation, asynchronous result ownership, rendering, and mouse hit-testing.
+- `src/app/`: navigation state, asynchronous result ownership, keys, completion, history, worker, and view options.
+- `src/ui/`: rendering, reading layout, panes, help, and mouse hit-testing.
+- `src/theme.rs`: color roles and `NO_COLOR` handling.
 - `scripts/prepare.py`: raw Wiktextract validation/normalization and wordfreq scoring.
 - `scripts/terminal_smoke.py`: actual POSIX PTY input and terminal restoration check.
 - `scripts/package.py`: validated program/data/bundle release archives.
