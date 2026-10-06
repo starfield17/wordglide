@@ -29,7 +29,7 @@ class PackagingTests(unittest.TestCase):
             output = root / "output"
             subprocess.run([sys.executable, str(Path(__file__).with_name("package.py")),
                             "--pack", str(pack), "--binaries", str(binaries),
-                            "--target", "fixture-target", "--version", "0.1.0",
+                            "--target", "x86_64-unknown-linux-musl", "--version", "0.1.0",
                             "--output", str(output)], check=True, capture_output=True)
             archives = list(output.glob("*.tar.gz"))
             self.assertEqual(len(archives), 3)
