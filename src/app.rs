@@ -291,7 +291,7 @@ impl App {
         }
     }
 
-    pub(crate) fn inline_suffix(&self) -> Option<String> {
+    fn inline_candidate(&self) -> Option<&Candidate> {
         if self.focus != Focus::Input
             || self.cursor != self.input.len()
             || self.input.is_empty()
@@ -299,13 +299,25 @@ impl App {
         {
             return None;
         }
-        let candidate = self.results.get(self.selected)?;
         let query = normalize(&self.input);
-        let suffix = candidate.key.strip_prefix(&query)?;
-        if suffix.is_empty() {
-            None
-        } else {
-            Some(suffix.into())
+        let extends = |candidate: &&Candidate| {
+            candidate.key.len() > query.len() && candidate.key.starts_with(&query)
+        };
+        self.results
+            .get(self.selected)
+            .filter(extends)
+            .or_else(|| self.results.iter().find(extends))
+    }
+
+    pub(crate) fn inline_suffix(&self) -> Option<String> {
+        let candidate = self.inline_candidate()?;
+        Some(candidate.key[normalize(&self.input).len()..].into())
+    }
+
+    fn accept_inline(&mut self) {
+        if let Some(candidate) = self.inline_candidate() {
+            let word = candidate.headword.clone();
+            self.accept_word(word, false);
         }
     }
 
@@ -314,6 +326,10 @@ impl App {
             return;
         };
         let word = candidate.headword.clone();
+        self.accept_word(word, reading);
+    }
+
+    fn accept_word(&mut self, word: String, reading: bool) {
         let restart = self.input != word || self.completion.is_some();
         self.input = word;
         self.cursor = self.input.len();
@@ -407,7 +423,7 @@ impl App {
                 KeyCode::Char('p') => self.select(self.selected.saturating_sub(1)),
                 KeyCode::Char('a') => self.cursor = 0,
                 KeyCode::Char('e') => self.cursor = self.input.len(),
-                KeyCode::Char('f') if self.inline_suffix().is_some() => self.accept(false),
+                KeyCode::Char('f') => self.accept_inline(),
                 KeyCode::Char('l') => {
                     if self.completion.is_some() {
                         self.accept(false);
@@ -492,8 +508,8 @@ impl App {
                     .map_or(0, |(i, _)| i)
             }
             KeyCode::Right if self.focus == Focus::Input => {
-                if self.inline_suffix().is_some() {
-                    self.accept(false);
+                if self.inline_candidate().is_some() {
+                    self.accept_inline();
                 } else if let Some(c) = self.input[self.cursor..].chars().next() {
                     self.cursor += c.len_utf8();
                 }

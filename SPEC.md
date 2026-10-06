@@ -14,7 +14,9 @@ Base score: 100*Zipf - 2*character count - 100*extra whitespace-separated words.
 Fuzzy: 3–64 query characters, insertion/deletion/substitution/adjacent swap.
 Completion: fish-style Tab common prefix then fixed top-20 cycling; Shift+Tab
 reverses; Esc restores original input; gray prefix suffix accepted with Right at
-input end or Ctrl+F. Enter accepts candidate and focuses reading; Ctrl+L switches
+input end or Ctrl+F. Prediction prefers the selected strict prefix extension,
+otherwise the first strict prefix extension in the ranked list; exact matches
+keep their selection and preview. Enter accepts candidate and focuses reading; Ctrl+L switches
 focus. Completion does not add lookup history or affect fixed ranking.
 Distribution: public Wordglide repository; three download types (program, shared
 data, combined bundle). Adjacent english-pack auto-discovery precedes existing

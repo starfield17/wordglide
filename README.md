@@ -111,7 +111,11 @@ replaced with a newly built or downloaded pack.
 | ← / →, Home / End, Ctrl+A / Ctrl+E | Edit input position |
 
 Gray suffixes are displayed only for prefix suggestions at the end of the
-input; typing still triggers immediate previews without accepting a suggestion.
+input. The selected candidate supplies the prediction when it extends the query;
+otherwise the first longer prefix candidate supplies it. An exact match can stay
+selected and previewed while a longer word is predicted. Right/Ctrl+F accepts the
+prediction; Enter accepts the selected candidate. Typing still triggers immediate
+previews without accepting a suggestion.
 Tab completes the whole dictionary query, including phrases, without adding a
 space. Multiple matches first extend to the common prefix of all prefix matches,
 including words outside the visible top 20. Further Tab presses cycle the fixed

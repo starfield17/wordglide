@@ -76,7 +76,7 @@ CRC-checked before use. Complete SHA/index/database verification passed separate
   target: ≤512 MiB. The previous format measured about 164 MiB.
 - Both real-PTY checks passed: automatic preview without Enter, successful
   exit, restored terminal attributes, and restored alternate screen.
-- Formatting, Clippy with warnings denied, 24 Rust tests, one compile-fail
+- Formatting, Clippy with warnings denied, 27 Rust tests, one compile-fail
   boundary doc test, and ten Python pipeline tests passed.
 
 Full-pack checks confirm `went → go`, `better → good / well`, and

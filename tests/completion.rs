@@ -195,7 +195,14 @@ fn exact_match_keeps_preview_while_ghost_acceptance_uses_prefix_candidate() {
         settle(&mut app);
         assert_eq!(app.input, accepted);
         assert_eq!(app.preview.as_ref().unwrap().entry.key, accepted);
-        assert_eq!(app.focus, if code == KeyCode::Enter { Focus::Definition } else { Focus::Input });
+        assert_eq!(
+            app.focus,
+            if code == KeyCode::Enter {
+                Focus::Definition
+            } else {
+                Focus::Input
+            }
+        );
     }
 }
 
