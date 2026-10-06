@@ -40,7 +40,7 @@ filled definition cache. That cache has a separate 32 MiB budget.
 The CI matrix checks macOS and Linux. Release validation additionally builds
 Intel/ARM64 macOS and x86_64/ARM64 Linux packages, checks runtime dependencies,
 and exercises full-data bundles from an unrelated working directory without
-a dictionary path argument.
+a dictionary path argument. Windows is not a target.
 
 ## Startup comparison
 
@@ -76,8 +76,8 @@ CRC-checked before use. Complete SHA/index/database verification passed separate
   target: ≤512 MiB. The previous format measured about 164 MiB.
 - Both real-PTY checks passed: automatic preview without Enter, successful
   exit, restored terminal attributes, and restored alternate screen.
-- Formatting, Clippy with warnings denied, 27 Rust tests, one compile-fail
-  boundary doc test, and ten Python pipeline tests passed.
+- Formatting, Clippy with warnings denied, the full Rust test suite, one
+  compile-fail boundary doc test, and ten Python pipeline tests passed.
 
 Full-pack checks confirm `went → go`, `better → good / well`, and
 `chose → choose`. `house` and `fist` do not gain unrelated inverse aliases;

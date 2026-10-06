@@ -4,7 +4,9 @@ Intent: craft — an independently implemented offline incremental reading tool.
 Done when: type `ho`, see ranked completions and automatic definition preview;
 look up `hosue`, `went`, `better`, and `take off`; follow a word in a definition
 and return to the original query, selection, focus, and scroll position.
-Delivery: Rust `wordglide [QUERY] [--data PACK_DIRECTORY]`; macOS and Linux.
+Delivery: Rust `wordglide [QUERY] [--data PACK_DIRECTORY]`; macOS and Linux
+terminals only. Windows is out of scope for now: no Windows target is built and
+only POSIX terminals are exercised, so do not add Windows-only paths.
 Quality: readable source-grounded English definitions, deterministic ranking;
 no Enter to search. Startup loads only compact, prebuilt indexes. Warm-session input-to-draw P95
 target <=50 ms, resident-memory target <=512 MiB on the full data pack.
@@ -59,6 +61,7 @@ Oracle: compare indexed top-k with exhaustive fixed-score ranking in tests.
 Boundary check: compiler privacy/doc test; runtime owns no downloader.
 
 ## Found · Not doing
+- Windows support: no target and no WinAPI terminal paths, until POSIX shells are fully settled.
 - Open source definitions and example coverage do not equal Oxford editorial quality.
 - Word frequency cannot infer the relative frequency of senses within a word.
 

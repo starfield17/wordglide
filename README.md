@@ -30,6 +30,9 @@ configuration is required to use a release bundle. Supported release targets:
 | Linux x86_64 | `x86_64-unknown-linux-musl` |
 | Linux ARM64 | `aarch64-unknown-linux-musl` |
 
+Windows is not supported at this stage. No Windows target is built and only
+POSIX terminals are exercised.
+
 Each release provides three download types:
 
 - **Program only:** `wordglide-vVERSION-TARGET.tar.gz`.
@@ -46,7 +49,7 @@ Linux executables use static musl linking; macOS executables use system librarie
 Requires a Rust toolchain and a C toolchain for bundled SQLite. The project pins
 Rust 1.99.0 for reproducible development and CI; package MSRV is 1.88, but that
 older version has not been separately verified. Supported environments are
-macOS and Linux terminals.
+macOS and Linux terminals; Windows is out of scope for now.
 
 ```sh
 cargo build --release --bins
@@ -95,7 +98,7 @@ replaced with a newly built or downloaded pack.
 | --- | --- |
 | Type / paste | Incremental lookup while input is focused |
 | ↑ / ↓ or Ctrl+P / Ctrl+N | Select candidate; preview follows |
-| PageUp / PageDown | Scroll the definition by one visible page |
+| PageUp / PageDown, or the wheel | Scroll the definition by one visible page; works while hints show |
 | Tab | Complete common prefix, then cycle a fixed candidate list |
 | Shift+Tab | Cycle completions backward |
 | → at input end / Ctrl+F | Accept the gray suggestion |
@@ -104,11 +107,9 @@ replaced with a newly built or downloaded pack.
 | Home / End in definition | Jump to the start / end of the definitions |
 | `f` in definition | Show two-letter hints on visible dictionary words |
 | Hint letters | Follow that word, without Enter |
-| PageUp / PageDown, wheel while hints show | Scroll to hint words further down the definitions |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |
 | Click in the input box | Return focus to the input, without moving the cursor |
-| Wheel anywhere | Scroll the definition |
 | Esc | Undo active completion, cancel hints, or return input focus |
 | Ctrl+O | Return to previous query, selection, focus, and scroll |
 | Ctrl+U | Clear input for another lookup |
@@ -212,7 +213,9 @@ python3 scripts/prepare.py --input data/sample-source/raw.jsonl \
 ## Checks, benchmarks, and distribution
 
 ```sh
+make build                 # release wordglide, dict-build, dict-bench
 make check                 # or make check PYTHON=/path/to/python
+make clean                 # remove the cargo target directory
 python3 scripts/terminal_smoke.py --data data/sample-pack
 ./target/release/dict-bench --data data/english-pack --iterations 100
 python3 scripts/package.py --pack data/english-pack --target RUST_TARGET --output dist/release

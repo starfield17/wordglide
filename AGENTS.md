@@ -1,11 +1,15 @@
 # Project map
 
 Run `make check`: formatting, Clippy (all owned targets), Rust tests/doc tests,
-and Python pipeline tests. Keep code, scripts, and Makefile portable: do not
-embed developer-specific paths, environment activation, or machine settings.
+and Python pipeline tests. `make build` builds the release binaries; `make clean`
+removes the cargo target directory. Keep code, scripts, and Makefile portable: do
+not embed developer-specific paths, environment activation, or machine settings.
 The Makefile defaults to `python3`; select a Python environment at invocation.
 Do not commit personal paths, usernames, environment names, or machine details,
 including in this file. Keep environment selection outside the repository.
+
+Targets are macOS and Linux only; Windows is unsupported for now. Keep terminal
+and mouse code POSIX and ANSI, and do not add Windows-only paths.
 
 - `src/lib.rs`: public contract; private modules enforce internal visibility.
 - `src/index.rs`: compact lexicon codec, prebuilt ranking, prefix top-k, fuzzy queries.
