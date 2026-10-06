@@ -251,6 +251,30 @@ fn reading_lines(app: &App) -> Vec<ReadingLine> {
     lines
 }
 
+fn hanging_indent(text: &str) -> usize {
+    let digits_len = text.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits_len > 0 && text[digits_len..].starts_with(". ") {
+        return text[..digits_len + 2].width();
+    }
+    let ws_len: usize = text
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .map(char::len_utf8)
+        .sum();
+    let ws = &text[..ws_len];
+    let rest = &text[ws_len..];
+    if rest.starts_with("• ") {
+        return text[..ws_len + "• ".len()].width();
+    }
+    if rest.starts_with("— ") {
+        return text[..ws_len + "— ".len()].width();
+    }
+    if ws_len > 0 {
+        return ws.width();
+    }
+    0
+}
+
 // Wrap first, then label; annotations never change line lengths or scroll coordinates.
 fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
     let width = width.max(1);
@@ -276,36 +300,63 @@ fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
             .collect::<Vec<_>>()
     });
     for line in lines {
+        if line.text.width() <= width {
+            result.push(line);
+            continue;
+        }
+        let raw_indent = hanging_indent(&line.text);
+        let indent = raw_indent.min(width.saturating_sub(1));
+        let indent_str = " ".repeat(indent);
         let mut current = String::new();
         let mut columns = 0;
+        let mut is_continuation = false;
         for token in line.text.split_word_bounds() {
+            let is_ws = token.chars().all(char::is_whitespace);
+            if is_continuation && columns == indent && is_ws {
+                continue;
+            }
             let n = token.width();
-            if columns + n > width && columns > 0 {
+            let min_cols = if is_continuation { indent } else { 0 };
+            if columns + n > width && columns > min_cols {
                 result.push(ReadingLine {
                     text: current,
                     style: line.style,
                 });
-                current = String::new();
-                columns = 0;
-            }
-            for grapheme in token.graphemes(true) {
-                let n = grapheme.width();
-                if columns + n > width && columns > 0 {
-                    result.push(ReadingLine {
-                        text: current,
-                        style: line.style,
-                    });
-                    current = String::new();
-                    columns = 0;
+                is_continuation = true;
+                current = indent_str.clone();
+                columns = indent;
+                if is_ws {
+                    continue;
                 }
-                current.push_str(grapheme);
+            }
+            if columns + n <= width {
+                current.push_str(token);
                 columns += n;
+            } else {
+                for grapheme in token.graphemes(true) {
+                    let gn = grapheme.width();
+                    let min_cols = if is_continuation { indent } else { 0 };
+                    if columns + gn > width && columns > min_cols {
+                        result.push(ReadingLine {
+                            text: current,
+                            style: line.style,
+                        });
+                        is_continuation = true;
+                        current = indent_str.clone();
+                        columns = indent;
+                    }
+                    current.push_str(grapheme);
+                    columns += gn;
+                }
             }
         }
-        result.push(ReadingLine {
-            text: current,
-            style: line.style,
-        });
+        let min_cols = if is_continuation { indent } else { 0 };
+        if !is_continuation || columns > min_cols {
+            result.push(ReadingLine {
+                text: current,
+                style: line.style,
+            });
+        }
     }
     result
 }
@@ -995,6 +1046,140 @@ mod tests {
                 .iter()
                 .all(|line| !line.text.contains('\n') && !line.text.contains('\u{1b}'))
         );
+    }
+
+    #[test]
+    fn hanging_indent_computes_expected_prefix_widths() {
+        assert_eq!(hanging_indent("1. text"), 3);
+        assert_eq!(hanging_indent("12. text"), 4);
+        assert_eq!(hanging_indent("   • text"), 5);
+        assert_eq!(hanging_indent("     — text"), 7);
+        assert_eq!(hanging_indent("house  noun  /haʊs/"), 0);
+        assert_eq!(hanging_indent("Source: https://example.com"), 0);
+        assert_eq!(hanging_indent("  whitespace only"), 2);
+        assert_eq!(hanging_indent(""), 0);
+    }
+
+    #[test]
+    fn wrapped_definition_lines_hanging_indents_and_display_widths() {
+        let long_sense = "1. Economics is a messy discipline: too fluid to be a science, too rigorous to be an art, yet full of profound insights into human behavior and complex institutions.";
+        let long_example = "   • Economics is a messy discipline: too fluid to be a science, too rigorous to be an art, yet full of profound insights into human behavior and complex institutions.";
+        let long_reference = "     — 1993, Francis J. Sheed, Theology and Sanity, Sheed & Ward, London and New York, page 1234, an extensive reference citation.";
+        let long_heading = "house  noun  /haʊs/  [archaic / obsolete]  an established residence or dwelling place throughout history";
+        let long_source = "Source: https://en.wiktionary.org/wiki/economics_is_a_messy_discipline_too_fluid_to_be_a_science";
+
+        for width in [20, 30, 40, 80] {
+            // A long "1. ..." sense wraps with every continuation prefix equal to 3 spaces
+            let sense_lines = wrap(
+                vec![ReadingLine {
+                    text: long_sense.into(),
+                    style: Style::default(),
+                }],
+                width,
+            );
+            assert!(sense_lines.len() > 1, "sense must wrap at width {width}");
+            assert!(sense_lines[0].text.starts_with("1. "));
+            for (idx, line) in sense_lines.iter().enumerate().skip(1) {
+                assert!(
+                    line.text.starts_with("   ") && !line.text.starts_with("    "),
+                    "continuation line {idx} prefix mismatch at width {width}: {:?}",
+                    line.text
+                );
+            }
+
+            // A long "   • ..." example wraps with every continuation prefix equal to 5 spaces
+            let example_lines = wrap(
+                vec![ReadingLine {
+                    text: long_example.into(),
+                    style: Style::default(),
+                }],
+                width,
+            );
+            assert!(
+                example_lines.len() > 1,
+                "example must wrap at width {width}"
+            );
+            assert!(example_lines[0].text.starts_with("   • "));
+            for (idx, line) in example_lines.iter().enumerate().skip(1) {
+                assert!(
+                    line.text.starts_with("     ") && !line.text.starts_with("      "),
+                    "continuation line {idx} prefix mismatch at width {width}: {:?}",
+                    line.text
+                );
+            }
+
+            // A long "     — ..." reference wraps with every continuation prefix equal to 7 spaces
+            let ref_lines = wrap(
+                vec![ReadingLine {
+                    text: long_reference.into(),
+                    style: Style::default(),
+                }],
+                width,
+            );
+            assert!(ref_lines.len() > 1, "reference must wrap at width {width}");
+            assert!(ref_lines[0].text.starts_with("     — "));
+            for (idx, line) in ref_lines.iter().enumerate().skip(1) {
+                assert!(
+                    line.text.starts_with("       ") && !line.text.starts_with("        "),
+                    "continuation line {idx} prefix mismatch at width {width}: {:?}",
+                    line.text
+                );
+            }
+
+            // A wrapped heading and a wrapped "Source: ..." line have no indent
+            let heading_lines = wrap(
+                vec![ReadingLine {
+                    text: long_heading.into(),
+                    style: Style::default(),
+                }],
+                width,
+            );
+            assert!(
+                heading_lines.len() > 1,
+                "heading must wrap at width {width}"
+            );
+            for (idx, line) in heading_lines.iter().enumerate().skip(1) {
+                assert!(
+                    !line.text.starts_with(' '),
+                    "heading continuation line {idx} must have no indent at width {width}: {:?}",
+                    line.text
+                );
+            }
+
+            let source_lines = wrap(
+                vec![ReadingLine {
+                    text: long_source.into(),
+                    style: Style::default(),
+                }],
+                width,
+            );
+            assert!(source_lines.len() > 1, "source must wrap at width {width}");
+            for (idx, line) in source_lines.iter().enumerate().skip(1) {
+                assert!(
+                    !line.text.starts_with(' '),
+                    "source continuation line {idx} must have no indent at width {width}: {:?}",
+                    line.text
+                );
+            }
+
+            // Every produced line's display width <= width for width in {20, 30, 40, 80}
+            for all_lines in [
+                &sense_lines,
+                &example_lines,
+                &ref_lines,
+                &heading_lines,
+                &source_lines,
+            ] {
+                for line in all_lines.iter() {
+                    assert!(
+                        line.text.width() <= width,
+                        "line width {} exceeds max {width}: {:?}",
+                        line.text.width(),
+                        line.text
+                    );
+                }
+            }
+        }
     }
 
     #[test]
