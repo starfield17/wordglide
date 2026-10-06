@@ -21,7 +21,16 @@ focus. Completion does not add lookup history or affect fixed ranking.
 Mouse: left click inside the definition pane focuses it; clicking a visible word
 there follows it when the pack contains it. The first click only focuses, so a
 single click never navigates. Clicks in the input box return focus without
-moving the cursor; motion/drag/scroll events are ignored and do not redraw.
+moving the cursor. The wheel scrolls the definition from any focus; motion and
+drag events are ignored and do not redraw. Only press and wheel reporting is
+enabled, not `?1003h` motion tracking.
+Reading keys: PageUp/PageDown move by one visible page (one line of overlap),
+Home/End jump to the start/end, and no plain letter scrolls, so `j` and `k` stay
+ordinary input characters. Hints do not freeze the page: while `f` hint mode is
+active the same keys and the wheel still scroll, and the hints are rebuilt for
+the newly visible lines. Editing shortcuts (Ctrl+U/A/E/F) act only while the
+input has focus; in the definition they are ignored and Ctrl+U does not clear
+the query.
 Distribution: public Wordglide repository; three download types (program, shared
 data, combined bundle). Adjacent english-pack auto-discovery precedes existing
 user-data directory; explicit --data wins. Runtime never downloads data.

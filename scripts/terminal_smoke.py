@@ -46,6 +46,8 @@ def main():
         print(f"Startup to terminal UI: {(time.monotonic() - started) * 1000:.3f} ms")
         if b"\x1b[?1006h" not in output:
             raise AssertionError("Mouse reporting was not enabled")
+        if b"\x1b[?1003h" in output:
+            raise AssertionError("All-motion mouse tracking should not be enabled")
         os.write(master, args.query.encode("utf-8"))
         deadline = time.monotonic() + 5
         needle = args.needle.encode("utf-8")
@@ -64,6 +66,8 @@ def main():
             raise AssertionError("Alternate screen was not restored")
         if b"\x1b[?1006l" not in output:
             raise AssertionError("Mouse reporting was not disabled")
+        if b"\x1b[?1000l" not in output or b"\x1b[?1000h" not in output:
+            raise AssertionError("Button reporting was not toggled")
         print(f"PASS: real PTY typed {args.query} without Enter, previewed expected source text, and restored terminal state")
         rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
         rss_mib = rss / (1024 * 1024 if sys.platform == "darwin" else 1024)

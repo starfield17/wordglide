@@ -1,9 +1,10 @@
 use crate::{App, Dictionary, Entry, Focus, MatchKind};
 use anyhow::Result;
 use crossterm::{
+    Command,
     event::{
-        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-        Event, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind, MouseButton,
+        MouseEvent, MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -16,11 +17,15 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
-use std::{collections::HashMap, io, time::Duration};
+use std::{collections::HashMap, fmt, io, time::Duration};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 const ACCENT: Color = Color::Cyan;
+
+/// Lines moved per wheel notch. Terminals send one event per notch, so this
+/// stays small enough to feel continuous.
+const WHEEL_LINES: usize = 3;
 
 #[derive(Clone)]
 struct ReadingLine {
@@ -397,12 +402,18 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     render_definition(frame, app, panes[1], pointer);
     let help = if app.picking {
         format!(
-            "Label: {}_  · type both letters · Esc cancels",
+            "Label: {}_  · type both letters · PgUp/PgDn scroll · Esc cancels",
             app.label_input
+        )
+    } else if app.focus == Focus::Definition {
+        format!(
+            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input\nCtrl+L focus · Ctrl+O back ({}) · Ctrl+C quit{}",
+            app.history_len(),
+            if app.loading { " · loading…" } else { "" }
         )
     } else {
         format!(
-            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus\nPgUp/Dn scroll · f follow · Ctrl+O back ({}) · Ctrl+U new · Ctrl+C quit{}",
+            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll\nf follow · Ctrl+O back ({}) · Ctrl+U new · Ctrl+C quit{}",
             app.history_len(),
             if app.loading { " · loading…" } else { "" }
         )
@@ -453,6 +464,8 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut
         }));
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    // A page keeps one line of overlap so no definition line is skipped.
+    app.page = inner.height.saturating_sub(1).max(1) as usize;
     let lines = wrap(reading_lines(app), inner.width as usize);
     app.max_scroll = lines.len().saturating_sub(inner.height as usize);
     app.scroll = app.scroll.min(app.max_scroll);
@@ -503,8 +516,13 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut
 /// visible state changed. Motion and drag are ignored so `?1003h` traffic never
 /// forces a redraw.
 fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return false;
+    match mouse.kind {
+        MouseEventKind::ScrollUp => return app.scroll_by(-(WHEEL_LINES as isize)),
+        MouseEventKind::ScrollDown => return app.scroll_by(WHEEL_LINES as isize),
+        MouseEventKind::Down(MouseButton::Left) => {}
+        // Motion, drag, and other buttons are never read, so they must not
+        // force a redraw either.
+        _ => return false,
     }
     if pointer.definition.contains(mouse.column, mouse.row) {
         if app.picking {
@@ -534,6 +552,34 @@ fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
     false
 }
 
+/// Mouse reporting narrowed to button presses and wheel scrolling.
+///
+/// `crossterm::event::EnableMouseCapture` additionally turns on `?1003h`, which
+/// reports every pointer motion. Nothing here reads motion events, so that
+/// traffic only slows the event loop down. Enabling `?1000h` with SGR
+/// coordinates keeps clicks and the wheel and leaves native drag-selection
+/// working in most terminals.
+///
+/// Deliberately ANSI-only: Wordglide ships for macOS and Linux, so there is no
+/// WinAPI fallback to keep in step with the sequences below.
+#[derive(Clone, Copy)]
+struct MouseTracking {
+    enabled: bool,
+}
+
+const MOUSE_ON: MouseTracking = MouseTracking { enabled: true };
+const MOUSE_OFF: MouseTracking = MouseTracking { enabled: false };
+
+impl Command for MouseTracking {
+    fn write_ansi(&self, f: &mut impl fmt::Write) -> fmt::Result {
+        f.write_str(if self.enabled {
+            "\x1b[?1000h\x1b[?1006h"
+        } else {
+            "\x1b[?1006l\x1b[?1000l"
+        })
+    }
+}
+
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
@@ -541,7 +587,7 @@ impl Drop for TerminalGuard {
         let _ = execute!(
             io::stdout(),
             DisableBracketedPaste,
-            DisableMouseCapture,
+            MOUSE_OFF,
             LeaveAlternateScreen
         );
     }
@@ -555,7 +601,7 @@ pub fn run(dictionary: Dictionary, query: &str) -> Result<()> {
         let _ = execute!(
             io::stdout(),
             DisableBracketedPaste,
-            DisableMouseCapture,
+            MOUSE_OFF,
             LeaveAlternateScreen
         );
         old_hook(info);
@@ -566,7 +612,7 @@ pub fn run(dictionary: Dictionary, query: &str) -> Result<()> {
         io::stdout(),
         EnterAlternateScreen,
         EnableBracketedPaste,
-        EnableMouseCapture
+        MOUSE_ON
     )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut pointer = Pointer::default();
@@ -605,7 +651,7 @@ pub fn run(dictionary: Dictionary, query: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::{Dictionary, build_pack};
-    use crossterm::event::KeyModifiers;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::backend::TestBackend;
     use std::{
         path::Path,
@@ -647,6 +693,10 @@ mod tests {
 
     fn paint(app: &mut App, terminal: &mut Terminal<TestBackend>, pointer: &mut Pointer) {
         terminal.draw(|frame| render(frame, app, pointer)).unwrap();
+    }
+
+    fn stroke(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
     }
 
     #[test]
@@ -750,5 +800,106 @@ mod tests {
         assert!(on_mouse(&mut app, &pointer, click(column, row)));
         assert_eq!(app.focus, Focus::Definition);
         assert_eq!(app.input, "fist");
+    }
+
+    #[test]
+    fn wheel_scrolls_the_reading_pane_and_clamps() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        assert!(app.max_scroll > 4 * WHEEL_LINES);
+
+        let (column, row) = (pointer.definition.x, pointer.definition.y);
+        let notch = |kind| MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(on_mouse(
+            &mut app,
+            &pointer,
+            notch(MouseEventKind::ScrollDown)
+        ));
+        assert_eq!(app.scroll, WHEEL_LINES);
+        assert_eq!(app.focus, Focus::Input);
+        assert!(on_mouse(
+            &mut app,
+            &pointer,
+            notch(MouseEventKind::ScrollUp)
+        ));
+        assert_eq!(app.scroll, 0);
+        assert!(!on_mouse(
+            &mut app,
+            &pointer,
+            notch(MouseEventKind::ScrollUp)
+        ));
+
+        app.scroll = app.max_scroll;
+        assert!(!on_mouse(
+            &mut app,
+            &pointer,
+            notch(MouseEventKind::ScrollDown)
+        ));
+    }
+
+    #[test]
+    fn page_keys_scroll_by_the_visible_height() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(100, 14)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        app.focus = Focus::Definition;
+        let page = app.page;
+        assert!(
+            page >= 2 && page < app.max_scroll,
+            "page {page} against max {}",
+            app.max_scroll
+        );
+
+        stroke(&mut app, KeyCode::PageDown);
+        assert_eq!(app.scroll, page);
+        stroke(&mut app, KeyCode::PageDown);
+        assert_eq!(app.scroll, (2 * page).min(app.max_scroll));
+        stroke(&mut app, KeyCode::End);
+        assert_eq!(app.scroll, app.max_scroll);
+        stroke(&mut app, KeyCode::Home);
+        assert_eq!(app.scroll, 0);
+        stroke(&mut app, KeyCode::PageUp);
+        assert_eq!(app.scroll, 0);
+    }
+
+    #[test]
+    fn hints_stay_usable_after_scrolling_a_page() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(100, 14)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        app.focus = Focus::Definition;
+        stroke(&mut app, KeyCode::Char('f'));
+        assert!(app.picking);
+        assert!(app.page < app.max_scroll);
+
+        stroke(&mut app, KeyCode::PageDown);
+        assert_eq!(app.scroll, app.page, "hint mode must scroll");
+        assert!(app.picking, "scrolling must not cancel hint mode");
+        assert!(app.label_input.is_empty());
+
+        // Labels are rebuilt for the newly visible lines on the next frame.
+        paint(&mut app, &mut terminal, &mut pointer);
+        let (label, word) = app.labels.first().cloned().expect("hints on the new page");
+        for letter in label.chars() {
+            stroke(&mut app, KeyCode::Char(letter));
+        }
+        settle(&mut app);
+        assert_eq!(app.input, word);
+        assert!(!app.picking);
     }
 }

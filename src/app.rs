@@ -53,6 +53,7 @@ pub struct App {
     pub labels: Vec<(String, String)>,
     pub exit: bool,
     pub(crate) max_scroll: usize,
+    pub(crate) page: usize,
     lexicon: Arc<Index>,
     history: VecDeque<Location>,
     generation: u64,
@@ -112,6 +113,7 @@ impl App {
             labels: vec![],
             exit: false,
             max_scroll: 0,
+            page: 10,
             lexicon,
             history: VecDeque::new(),
             generation: 0,
@@ -130,6 +132,19 @@ impl App {
 
     pub fn contains(&self, word: &str) -> bool {
         self.lexicon.exact(&normalize(word)).is_some()
+    }
+
+    /// Move the reading position by `lines` relative to the current offset,
+    /// clamped to the content. Returns whether the position actually changed.
+    pub(crate) fn scroll_by(&mut self, lines: isize) -> bool {
+        let before = self.scroll;
+        let target = if lines < 0 {
+            self.scroll.saturating_sub(lines.unsigned_abs())
+        } else {
+            self.scroll.saturating_add(lines as usize)
+        };
+        self.scroll = target.min(self.max_scroll);
+        self.scroll != before
     }
 
     fn search(&mut self) {
@@ -413,7 +428,7 @@ impl App {
             match key.code {
                 KeyCode::Char('c') => self.exit = true,
                 KeyCode::Char('o') => self.back(),
-                KeyCode::Char('u') => {
+                KeyCode::Char('u') if self.focus == Focus::Input => {
                     self.input.clear();
                     self.cursor = 0;
                     self.focus = Focus::Input;
@@ -421,9 +436,9 @@ impl App {
                 }
                 KeyCode::Char('n') => self.select(self.selected.saturating_add(1)),
                 KeyCode::Char('p') => self.select(self.selected.saturating_sub(1)),
-                KeyCode::Char('a') => self.cursor = 0,
-                KeyCode::Char('e') => self.cursor = self.input.len(),
-                KeyCode::Char('f') => self.accept_inline(),
+                KeyCode::Char('a') if self.focus == Focus::Input => self.cursor = 0,
+                KeyCode::Char('e') if self.focus == Focus::Input => self.cursor = self.input.len(),
+                KeyCode::Char('f') if self.focus == Focus::Input => self.accept_inline(),
                 KeyCode::Char('l') => {
                     if self.completion.is_some() {
                         self.accept(false);
@@ -449,6 +464,16 @@ impl App {
                     self.picking = false;
                     self.label_input.clear();
                 }
+                // Scrolling keeps hints usable on definitions longer than the
+                // pane; labels are rebuilt for the new lines on the next frame.
+                KeyCode::PageDown => {
+                    self.scroll_by(self.page as isize);
+                }
+                KeyCode::PageUp => {
+                    self.scroll_by(-(self.page as isize));
+                }
+                KeyCode::Home => self.scroll = 0,
+                KeyCode::End => self.scroll = self.max_scroll,
                 KeyCode::Backspace => {
                     self.label_input.pop();
                 }
@@ -479,8 +504,12 @@ impl App {
             KeyCode::Up if self.completion.is_some() => self.cycle_completion(true),
             KeyCode::Down => self.select(self.selected.saturating_add(1)),
             KeyCode::Up => self.select(self.selected.saturating_sub(1)),
-            KeyCode::PageDown => self.scroll = (self.scroll + 10).min(self.max_scroll),
-            KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(10),
+            KeyCode::PageDown => {
+                self.scroll_by(self.page as isize);
+            }
+            KeyCode::PageUp => {
+                self.scroll_by(-(self.page as isize));
+            }
             KeyCode::Esc => {
                 self.pending_completion.clear();
                 if self.focus == Focus::Input {
@@ -495,12 +524,8 @@ impl App {
                 self.picking = true;
                 self.label_input.clear();
             }
-            KeyCode::Char('j') if self.focus == Focus::Definition => {
-                self.scroll = (self.scroll + 1).min(self.max_scroll)
-            }
-            KeyCode::Char('k') if self.focus == Focus::Definition => {
-                self.scroll = self.scroll.saturating_sub(1)
-            }
+            KeyCode::Home if self.focus == Focus::Definition => self.scroll = 0,
+            KeyCode::End if self.focus == Focus::Definition => self.scroll = self.max_scroll,
             KeyCode::Left if self.focus == Focus::Input => {
                 self.cursor = self.input[..self.cursor]
                     .char_indices()

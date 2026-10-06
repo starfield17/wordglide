@@ -95,17 +95,20 @@ replaced with a newly built or downloaded pack.
 | --- | --- |
 | Type / paste | Incremental lookup while input is focused |
 | ↑ / ↓ or Ctrl+P / Ctrl+N | Select candidate; preview follows |
-| PageUp / PageDown | Scroll definition |
+| PageUp / PageDown | Scroll the definition by one visible page |
 | Tab | Complete common prefix, then cycle a fixed candidate list |
 | Shift+Tab | Cycle completions backward |
 | → at input end / Ctrl+F | Accept the gray suggestion |
 | Enter | Accept candidate and focus definition |
 | Ctrl+L | Switch input / definition focus |
-| `j` / `k` in definition | Scroll one line |
+| Home / End in definition | Jump to the start / end of the definitions |
 | `f` in definition | Show two-letter hints on visible dictionary words |
 | Hint letters | Follow that word, without Enter |
+| PageUp / PageDown, wheel while hints show | Scroll to hint words further down the definitions |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |
+| Click in the input box | Return focus to the input, without moving the cursor |
+| Wheel anywhere | Scroll the definition |
 | Esc | Undo active completion, cancel hints, or return input focus |
 | Ctrl+O | Return to previous query, selection, focus, and scroll |
 | Ctrl+U | Clear input for another lookup |
@@ -133,10 +136,12 @@ stacked panes; the minimum usable size is 30×10.
 
 Mouse works in two steps: the first click inside the definition pane focuses it,
 and clicking a visible word there follows it like a hint. Clicking the input box
-returns focus without moving the cursor. Only words present in the local pack
-respond, and the jump reuses the same session history as `Ctrl+O`. Mouse
-reporting is active while the UI runs, so terminals that also select text with
-the mouse need their bypass key (usually Shift) for native copy.
+returns focus without moving the cursor, and the wheel scrolls the definition
+from any focus. Only words present in the local pack respond, and the jump
+reuses the same session history as `Ctrl+O`. Reporting is limited to presses and
+the wheel, so pointer motion is never sent; terminals that still route
+drag-selection to the application need their bypass key (usually Shift) for
+native copy.
 
 ## Ranking and storage
 

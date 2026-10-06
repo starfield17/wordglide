@@ -38,6 +38,10 @@ fn key(app: &mut App, code: KeyCode) {
     app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
 }
 
+fn control(app: &mut App, code: KeyCode) {
+    app.handle_key(KeyEvent::new(code, KeyModifiers::CONTROL));
+}
+
 #[test]
 fn real_source_pack_supports_forms_phrases_and_no_rewrites() {
     let (_dir, mut dict) = dictionary();
@@ -152,6 +156,38 @@ fn rapid_input_never_publishes_old_preview() {
     app.paste("hosue");
     settle(&mut app);
     assert_eq!(app.preview.as_ref().unwrap().entry.key, "house");
+}
+
+#[test]
+fn definition_focus_ignores_plain_letters_and_input_shortcuts() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fist");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    app.cursor = 2;
+
+    for code in [
+        KeyCode::Char('j'),
+        KeyCode::Char('k'),
+        KeyCode::Char('x'),
+        KeyCode::Backspace,
+    ] {
+        key(&mut app, code);
+    }
+    for code in [
+        KeyCode::Char('u'),
+        KeyCode::Char('a'),
+        KeyCode::Char('e'),
+        KeyCode::Char('f'),
+    ] {
+        control(&mut app, code);
+    }
+
+    assert_eq!(app.input, "fist");
+    assert_eq!(app.cursor, 2);
+    assert_eq!(app.focus, Focus::Definition);
+    assert_eq!(app.scroll, 0);
+    assert!(!app.picking);
 }
 
 #[test]
