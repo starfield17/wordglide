@@ -109,6 +109,8 @@ replaced with a newly built or downloaded pack.
 | Hint letters | Follow that word, without Enter |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |
+| Click a candidate | Select it and preview it, keeping input focus |
+| Click the highlighted candidate again | Accept it and focus the definition |
 | Click in the input box | Return focus to the input, without moving the cursor |
 | Esc | Undo active completion, cancel hints, or return input focus |
 | Ctrl+O | Return to previous query, selection, focus, and scroll |
@@ -138,7 +140,9 @@ stacked panes; the minimum usable size is 30×10.
 Mouse works in two steps: the first click inside the definition pane focuses it,
 and clicking a visible word there follows it like a hint. Clicking the input box
 returns focus without moving the cursor, and the wheel scrolls the definition
-from any focus. Only words present in the local pack respond, and the jump
+from any focus. A click on a candidate selects and previews it without moving
+the focus; clicking the highlighted candidate again accepts it, like Enter.
+Only words present in the local pack respond, and the jump
 reuses the same session history as `Ctrl+O`. Reporting is limited to presses and
 the wheel, so pointer motion is never sent; terminals that still route
 drag-selection to the application need their bypass key (usually Shift) for

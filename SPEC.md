@@ -23,7 +23,9 @@ focus. Completion does not add lookup history or affect fixed ranking.
 Mouse: left click inside the definition pane focuses it; clicking a visible word
 there follows it when the pack contains it. The first click only focuses, so a
 single click never navigates. Clicks in the input box return focus without
-moving the cursor. The wheel scrolls the definition from any focus; motion and
+moving the cursor. A candidate click selects and previews that row without
+moving focus; clicking the highlighted candidate again accepts it and focuses
+the definition. The wheel scrolls the definition from any focus; motion and
 drag events are ignored and do not redraw. Only press and wheel reporting is
 enabled, not `?1003h` motion tracking.
 Reading keys: PageUp/PageDown move by one visible page (one line of overlap),

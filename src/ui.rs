@@ -81,6 +81,9 @@ struct HitRow {
 struct Pointer {
     input: Region,
     definition: Region,
+    candidates: Region,
+    candidates_offset: usize,
+    candidates_len: usize,
     rows: Vec<HitRow>,
 }
 
@@ -88,6 +91,9 @@ impl Pointer {
     fn reset(&mut self) {
         self.input = Region::default();
         self.definition = Region::default();
+        self.candidates = Region::default();
+        self.candidates_offset = 0;
+        self.candidates_len = 0;
         self.rows.clear();
     }
 
@@ -398,7 +404,7 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
             .split(rows[1])
     };
     pointer.definition = Region::from(panes[1]);
-    render_candidates(frame, app, panes[0]);
+    render_candidates(frame, app, panes[0], pointer);
     render_definition(frame, app, panes[1], pointer);
     let help = if app.picking {
         format!(
@@ -424,7 +430,7 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     );
 }
 
-fn render_candidates(frame: &mut Frame, app: &App, area: Rect) {
+fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Pointer) {
     let items: Vec<_> = app
         .results
         .iter()
@@ -437,13 +443,13 @@ fn render_candidates(frame: &mut Frame, app: &App, area: Rect) {
             ListItem::new(format!("{}{}", c.headword, hint))
         })
         .collect();
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" Candidates · {} ", app.results.len()))
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(format!(" Candidates · {} ", app.results.len()))
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
+        .block(block)
         .highlight_style(Style::default().fg(Color::Black).bg(ACCENT))
         .highlight_symbol("› ");
     let mut state = ListState::default();
@@ -451,6 +457,11 @@ fn render_candidates(frame: &mut Frame, app: &App, area: Rect) {
         state.select(Some(app.selected));
     }
     frame.render_stateful_widget(list, area, &mut state);
+    // The list writes back the first visible index, and single-line items map
+    // one row per candidate, so a click row resolves to `offset + row`.
+    pointer.candidates = Region::from(inner);
+    pointer.candidates_offset = state.offset();
+    pointer.candidates_len = app.results.len();
 }
 
 fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut Pointer) {
@@ -542,6 +553,11 @@ fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
             return true;
         }
         return false;
+    }
+    if pointer.candidates.contains(mouse.column, mouse.row) {
+        let row = (mouse.row - pointer.candidates.y) as usize;
+        let index = pointer.candidates_offset + row;
+        return index < pointer.candidates_len && app.click_candidate(index);
     }
     if pointer.input.contains(mouse.column, mouse.row) && app.focus != Focus::Input {
         app.focus = Focus::Input;
@@ -901,5 +917,96 @@ mod tests {
         settle(&mut app);
         assert_eq!(app.input, word);
         assert!(!app.picking);
+    }
+
+    fn candidate_row(pointer: &Pointer, index: usize) -> u16 {
+        pointer.candidates.y + (index - pointer.candidates_offset) as u16
+    }
+
+    fn click_candidate(app: &mut App, pointer: &Pointer, index: usize) -> bool {
+        let column = pointer.candidates.x + 1;
+        on_mouse(app, pointer, click(column, candidate_row(pointer, index)))
+    }
+
+    #[test]
+    fn click_candidate_selects_it_without_moving_focus() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "ho");
+        settle(&mut app);
+        assert!(app.results.len() > 1, "need several candidates");
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        assert_eq!(pointer.candidates_offset, 0);
+
+        assert!(click_candidate(&mut app, &pointer, 1));
+        assert_eq!(app.selected, 1);
+        settle(&mut app);
+        assert_eq!(app.input, "ho", "selection must not accept the word");
+        assert_eq!(app.focus, Focus::Input);
+        assert_eq!(app.preview.as_ref().unwrap().entry.key, app.results[1].key);
+    }
+
+    #[test]
+    fn clicking_the_highlighted_candidate_accepts_and_focuses_definition() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "ho");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        let expected = app.results[app.selected].headword.clone();
+
+        assert_eq!(app.selected, 0);
+        let selected = app.selected;
+        assert!(click_candidate(&mut app, &pointer, selected));
+        settle(&mut app);
+        assert_eq!(app.input, expected);
+        assert_eq!(app.focus, Focus::Definition);
+        assert_eq!(app.preview.as_ref().unwrap().entry.key, expected);
+    }
+
+    #[test]
+    fn candidate_clicks_follow_a_scrolled_list() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "ho");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(100, 14)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        let visible = pointer.candidates.height as usize;
+        assert!(
+            app.results.len() > visible + 1,
+            "need a list longer than the pane"
+        );
+
+        // Move the selection past the pane so the list has to scroll.
+        for _ in 0..visible + 1 {
+            stroke(&mut app, KeyCode::Down);
+        }
+        settle(&mut app);
+        paint(&mut app, &mut terminal, &mut pointer);
+        assert!(pointer.candidates_offset > 0, "list should have scrolled");
+
+        let target = pointer.candidates_offset + 1;
+        assert!(click_candidate(&mut app, &pointer, target));
+        assert_eq!(app.selected, target);
+    }
+
+    #[test]
+    fn clicks_below_the_last_candidate_are_ignored() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "ho");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        let selected = app.selected;
+
+        let column = pointer.candidates.x + 1;
+        let row = pointer.candidates.y + app.results.len() as u16 + 1;
+        assert!(!on_mouse(&mut app, &pointer, click(column, row)));
+        assert_eq!(app.selected, selected);
+        assert_eq!(app.input, "ho");
     }
 }

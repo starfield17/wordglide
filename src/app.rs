@@ -222,6 +222,21 @@ impl App {
         changed
     }
 
+    /// Select a candidate row, or accept it when it is already the highlighted
+    /// one. Used by mouse clicks, where a second click on the same row follows
+    /// the word like Enter. Returns whether anything changed.
+    pub(crate) fn click_candidate(&mut self, index: usize) -> bool {
+        if index >= self.results.len() {
+            return false;
+        }
+        if index == self.selected {
+            self.accept(true);
+        } else {
+            self.select(index);
+        }
+        true
+    }
+
     fn select(&mut self, selected: usize) {
         if selected == self.selected || selected >= self.results.len() {
             return;
