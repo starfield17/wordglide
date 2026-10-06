@@ -1,6 +1,6 @@
 PYTHON ?= python3
 
-.PHONY: check build
+.PHONY: check build clean
 check:
 	cargo fmt --all -- --check
 	cargo clippy --all-targets -- -D warnings
@@ -10,3 +10,6 @@ check:
 
 build:
 	cargo build --release --bins
+
+clean:
+	cargo clean
