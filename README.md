@@ -66,12 +66,16 @@ source-grounded; lookups outside it need the full pack. Existing output director
 are never overwritten: choose a new name when rebuilding.
 
 You can start with a query: `wordglide "take off" --data data/sample-pack`.
-`--data` points to an unpacked pack directory. Without it, the application first looks for `english-pack/`
+`--data` points to an unpacked pack directory. Without it, the application checks
+`WORDGLIDE_DATA` (when set to a non-empty path), then looks for `english-pack/`
 beside the actual executable, including when launched through a symlink or from
 another working directory. It then checks the existing platform user-data
 directory under `dict/english`. An explicitly selected or adjacent damaged pack
 fails structural validation instead of silently switching dictionaries. Copy an entire pack
 to either location, or keep using `--data`. The application never downloads data.
+
+Add `--no-color` (or set `NO_COLOR`) for a color-free rendering, and `--no-mouse`
+to keep native terminal text selection.
 
 ## Verify a data pack
 
@@ -87,10 +91,20 @@ wordglide --verify-data --data PACK_DIRECTORY
 ```
 
 This checks all SHA-256 receipts, vocabulary/index agreement, prebuilt ranking,
-and SQLite integrity, then exits without opening the TUI. Omit `--data` to verify
-the automatically selected pack. Successful verification exits with status 0;
-errors exit with a nonzero status. Schema 2 packs are required; old packs must be
-replaced with a newly built or downloaded pack.
+and SQLite integrity, prints the entry count and elapsed time, then exits without
+opening the TUI. Omit `--data` to verify the automatically selected pack.
+Successful verification exits with status 0; errors exit with a nonzero status.
+Schema 2 packs are required; old packs must be replaced with a newly built or
+downloaded pack.
+
+To inspect a pack without verifying it:
+
+```sh
+wordglide --info --data PACK_DIRECTORY
+```
+
+This prints the pack path, schema, entry count, source snapshot, provenance, and
+data and code licenses.
 
 ## Keys
 
@@ -107,6 +121,9 @@ replaced with a newly built or downloaded pack.
 | Home / End in definition | Jump to the start / end of the definitions |
 | `f` in definition | Show two-letter hints on visible dictionary words |
 | Hint letters | Follow that word, without Enter |
+| `e` in definition | Examples and references: compact / full |
+| `p` in definition | Pronunciation (IPA): short / full |
+| `?` in definition / `F1` | Show the key help; Esc closes it |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |
 | Click a candidate | Select it and preview it, keeping input focus |
@@ -116,13 +133,19 @@ replaced with a newly built or downloaded pack.
 | Ctrl+Z | Return to the previous query, selection, focus, and scroll |
 | Ctrl+Y | Go forward again after going back |
 | Ctrl+U | Clear input for another lookup |
+| Ctrl+W / Alt+Backspace | Delete the previous word |
+| Ctrl+K | Delete from the cursor to the end |
 | Ctrl+C | Exit |
 | ← / →, Home / End, Ctrl+A / Ctrl+E | Edit input position |
+| Ctrl+← / Ctrl+→ | Move the cursor by one word |
+| Alt+← / Alt+→ | Step history back / forward |
 
 Gray suffixes are displayed only for prefix suggestions at the end of the
 input. The selected candidate supplies the prediction when it extends the query;
-otherwise the first longer prefix candidate supplies it. An exact match can stay
-selected and previewed while a longer word is predicted. Right/Ctrl+F accepts the
+otherwise the first longer prefix candidate supplies it. The prediction prefers
+a plain single word over a hyphenated or multi-word compound, and is hidden when
+it does not score above an exact match of the query, so an exact match can stay
+selected and previewed without a noisy suggestion. Right/Ctrl+F accepts the
 prediction; Enter accepts the selected candidate. Typing still triggers immediate
 previews without accepting a suggestion.
 Tab completes the whole dictionary query, including phrases, without adding a
