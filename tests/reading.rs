@@ -74,7 +74,7 @@ fn follow_label_and_back_restore_reading_location() {
     let (_dir, dict) = dictionary();
     let mut app = App::new(dict, "fist");
     settle(&mut app);
-    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Enter);
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
     terminal.draw(|frame| draw(frame, &mut app)).unwrap();
     key(&mut app, KeyCode::Char('f'));
