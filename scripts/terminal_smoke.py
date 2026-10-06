@@ -15,15 +15,18 @@ import time
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--binary", default="target/release/dict")
-    p.add_argument("--data", required=True)
+    p.add_argument("--binary", default="target/release/wordglide")
+    p.add_argument("--data", help="Omit to verify automatic adjacent-pack discovery")
     p.add_argument("--query", default="fist")
     p.add_argument("--needle", default="clenched", help="Expected source preview text")
     args = p.parse_args()
     master, slave = pty.openpty()
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
     before = termios.tcgetattr(slave)
-    process = subprocess.Popen([os.path.abspath(args.binary), "--data", args.data],
+    command = [os.path.abspath(args.binary)]
+    if args.data:
+        command.extend(["--data", args.data])
+    process = subprocess.Popen(command,
                                stdin=slave, stdout=slave, stderr=slave)
     output = bytearray()
 

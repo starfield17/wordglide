@@ -13,10 +13,13 @@ including in this file. Keep environment selection outside the repository.
 - `src/app.rs`, `src/ui.rs`: navigation, asynchronous result ownership, rendering.
 - `scripts/prepare.py`: raw Wiktextract validation/normalization and wordfreq scoring.
 - `scripts/terminal_smoke.py`: actual POSIX PTY input and terminal restoration check.
+- `scripts/package.py`: validated program/data/bundle release archives.
+- `.github/workflows/release.yml`: tag-triggered native builds and publication.
+- `data-release.json`: pinned dictionary Release asset and checksum; CI input only.
 - `tests/`: public API and real pack integration scenarios.
 - `SPEC.md`: accepted behaviors and performance targets.
 - `tuidict/`: separate reference project, excluded from our checks and build.
 
-Runtime/build separation is explicit: `dict` opens prepared packs; only
+Runtime/build separation is explicit: `wordglide` opens prepared packs; only
 `dict-build` and `scripts/prepare.py` write dictionary data. Review dependency
 and public export changes at the root manifest and `src/lib.rs`.

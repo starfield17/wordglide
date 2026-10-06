@@ -28,7 +28,7 @@ pub struct Dictionary {
 impl Dictionary {
     /// Open and validate a prepared pack. Missing/incompatible packs fail before TUI setup.
     pub fn open(path: &Path) -> Result<Self> {
-        let manifest:Manifest=serde_json::from_slice(&fs::read(path.join("manifest.json")).with_context(||format!("No data pack at {}. Unpack a compatible pack there, or use --data DIRECTORY. See README.md for local builds.",path.display()))?)?;
+        let manifest:Manifest=serde_json::from_slice(&fs::read(path.join("manifest.json")).with_context(||format!("No data pack at {}. Download and unpack a Wordglide with-data release, or use --data DIRECTORY. See README.md.",path.display()))?)?;
         ensure!(
             manifest.schema_version == SCHEMA_VERSION,
             "Incompatible data pack version {}; expected {}. Install a compatible pack.",

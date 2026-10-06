@@ -1,10 +1,10 @@
-# Local English dictionary
+# Wordglide
 
 Intent: craft — an independently implemented offline incremental reading tool.
 Done when: type `ho`, see ranked completions and automatic definition preview;
 look up `hosue`, `went`, `better`, and `take off`; follow a word in a definition
 and return to the original query, selection, focus, and scroll position.
-Delivery: Rust `dict [QUERY] --data PACK_DIRECTORY`; macOS and Linux.
+Delivery: Rust `wordglide [QUERY] [--data PACK_DIRECTORY]`; macOS and Linux.
 Quality: readable source-grounded English definitions, deterministic ranking;
 no Enter to search. Startup may preload indexes. Warm-session input-to-draw P95
 target <=50 ms, resident-memory target <=512 MiB on the full data pack.
@@ -12,6 +12,13 @@ Decisions: Wiktionary via raw Wiktextract, prepared packs, fixed wordfreq baseli
 up to 20 candidates; exact > valid inflection > prefix > one-edit fuzzy fallback.
 Base score: 100*Zipf - 2*character count - 100*extra whitespace-separated words.
 Fuzzy: 3–64 query characters, insertion/deletion/substitution/adjacent swap.
+Completion: fish-style Tab common prefix then fixed top-20 cycling; Shift+Tab
+reverses; Esc restores original input; gray prefix suffix accepted with Right at
+input end or Ctrl+F. Enter accepts candidate and focuses reading; Ctrl+L switches
+focus. Completion does not add lookup history or affect fixed ranking.
+Distribution: public Wordglide repository; three download types (program, shared
+data, combined bundle). Adjacent english-pack auto-discovery precedes existing
+user-data directory; explicit --data wins. Runtime never downloads data.
 Reading: POS/IPA/senses, at most two source examples per sense, no generated text;
 obsolete/archaic senses last. Existing phrases included. Navigation history is
 session-only and does not affect ranking.

@@ -240,7 +240,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .split(area);
     let input_block = Block::default()
         .borders(Borders::ALL)
-        .title(" English · local ")
+        .title(" Wordglide · English ")
         .border_style(Style::default().fg(if app.focus == Focus::Input {
             ACCENT
         } else {
@@ -253,7 +253,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         start += before[start..].chars().next().map_or(0, char::len_utf8);
     }
     frame.render_widget(
-        Paragraph::new(app.input[start..].to_string()).block(input_block),
+        Paragraph::new(Line::from(vec![
+            Span::raw(app.input[start..].to_string()),
+            Span::styled(
+                app.inline_suffix().unwrap_or_default(),
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]))
+        .block(input_block),
         rows[0],
     );
     if app.focus == Focus::Input && !app.picking {
@@ -282,7 +289,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         )
     } else {
         format!(
-            "↑↓ candidates · PgUp/Dn scroll · Tab focus · f follow · Ctrl+O back ({})\nCtrl+U new lookup · Ctrl+C quit{}",
+            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus\nPgUp/Dn scroll · f follow · Ctrl+O back ({}) · Ctrl+U new · Ctrl+C quit{}",
             app.history_len(),
             if app.loading { " · loading…" } else { "" }
         )

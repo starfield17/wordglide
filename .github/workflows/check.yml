@@ -27,6 +27,6 @@ jobs:
         with:
           name: dict-${{ matrix.os }}
           path: |
-            target/release/dict
+            target/release/wordglide
             target/release/dict-build
             target/release/dict-bench

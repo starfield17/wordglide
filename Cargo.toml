@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 description = "Offline incremental English dictionary with immediate definition preview"
-default-run = "dict"
+default-run = "wordglide"
 
 [dependencies]
 anyhow = "1"
@@ -27,7 +27,7 @@ unicode-width = "0.2"
 tempfile = "3"
 
 [[bin]]
-name = "dict"
+name = "wordglide"
 path = "src/main.rs"
 
 [[bin]]

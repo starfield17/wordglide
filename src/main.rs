@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use directories::ProjectDirs;
 use local_english_dict::{Dictionary, run};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(
@@ -19,13 +19,72 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let path = args
-        .data
-        .or_else(|| {
-            ProjectDirs::from("org", "local-english-dict", "dict")
-                .map(|d| d.data_dir().join("english"))
-        })
-        .context("Cannot determine data directory; use --data DIRECTORY")?;
+    let executable = std::env::current_exe().context("Cannot locate executable")?;
+    let user_data = ProjectDirs::from("org", "local-english-dict", "dict")
+        .map(|d| d.data_dir().join("english"));
+    let path = resolve_data(args.data, &executable, user_data)?;
     let dict = Dictionary::open(&path)?;
     run(dict, args.query.as_deref().unwrap_or(""))
+}
+
+fn resolve_data(
+    explicit: Option<PathBuf>,
+    executable: &Path,
+    user_data: Option<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(path) = explicit {
+        return Ok(path);
+    }
+    let executable = executable
+        .canonicalize()
+        .context("Cannot resolve executable location")?;
+    if let Some(parent) = executable.parent() {
+        let bundled = parent.join("english-pack");
+        if bundled.try_exists()? || bundled.is_symlink() {
+            return Ok(bundled);
+        }
+    }
+    user_data.context(
+        "Cannot determine data directory; download the with-data bundle, or use --data DIRECTORY",
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn explicit_then_adjacent_then_user_data_without_silent_corrupt_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("wordglide");
+        fs::write(&executable, "fixture").unwrap();
+        let user_data = dir.path().join("user-data");
+        assert_eq!(
+            resolve_data(None, &executable, Some(user_data.clone())).unwrap(),
+            user_data
+        );
+        let adjacent = dir.path().canonicalize().unwrap().join("english-pack");
+        fs::write(&adjacent, "invalid pack is still selected for validation").unwrap();
+        assert_eq!(
+            resolve_data(None, &executable, Some(user_data.clone())).unwrap(),
+            adjacent
+        );
+        let explicit = dir.path().join("explicit");
+        assert_eq!(
+            resolve_data(Some(explicit.clone()), &executable, Some(user_data.clone())).unwrap(),
+            explicit
+        );
+        #[cfg(unix)]
+        {
+            let links = dir.path().join("links");
+            fs::create_dir(&links).unwrap();
+            let link = links.join("wordglide");
+            std::os::unix::fs::symlink(&executable, &link).unwrap();
+            assert_eq!(
+                resolve_data(None, &link, Some(user_data)).unwrap(),
+                adjacent
+            );
+        }
+    }
 }

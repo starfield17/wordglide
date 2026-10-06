@@ -88,14 +88,38 @@ impl Index {
             .ok()
     }
 
-    pub(crate) fn prefix(&self, query: &str, limit: usize) -> Vec<usize> {
-        if query.is_empty() {
-            return vec![];
-        }
+    fn prefix_range(&self, query: &str) -> (usize, usize) {
         let left = self.words.partition_point(|w| w.key.as_str() < query);
         let right = self
             .words
             .partition_point(|w| w.key.as_str() < query || w.key.starts_with(query));
+        (left, right)
+    }
+
+    pub(crate) fn common_prefix(&self, query: &str) -> Option<String> {
+        if query.is_empty() {
+            return None;
+        }
+        let (left, right) = self.prefix_range(query);
+        if left == right {
+            return None;
+        }
+        Some(
+            self.words[left]
+                .key
+                .chars()
+                .zip(self.words[right - 1].key.chars())
+                .take_while(|(a, b)| a == b)
+                .map(|(a, _)| a)
+                .collect(),
+        )
+    }
+
+    pub(crate) fn prefix(&self, query: &str, limit: usize) -> Vec<usize> {
+        if query.is_empty() {
+            return vec![];
+        }
+        let (left, right) = self.prefix_range(query);
         let mut heap = BinaryHeap::new();
         self.push_range(&mut heap, left, right);
         let mut results = Vec::with_capacity(limit);

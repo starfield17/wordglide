@@ -33,6 +33,11 @@ struct Location {
     loading: bool,
 }
 
+struct Completion {
+    original: Location,
+    index: Option<usize>,
+}
+
 pub struct App {
     pub input: String,
     pub cursor: usize,
@@ -53,6 +58,8 @@ pub struct App {
     generation: u64,
     request: mpsc::Sender<Request>,
     response: mpsc::Receiver<Response>,
+    completion: Option<Completion>,
+    pending_completion: Vec<KeyEvent>,
 }
 
 impl App {
@@ -110,6 +117,8 @@ impl App {
             generation: 0,
             request: tx,
             response: rx,
+            completion: None,
+            pending_completion: vec![],
         };
         app.search();
         app
@@ -124,6 +133,8 @@ impl App {
     }
 
     fn search(&mut self) {
+        self.completion = None;
+        self.pending_completion.clear();
         self.generation += 1;
         self.selected = 0;
         self.scroll = 0;
@@ -182,6 +193,17 @@ impl App {
                 _ => {}
             }
         }
+        if !self.loading && !self.pending_completion.is_empty() {
+            let pending = std::mem::take(&mut self.pending_completion);
+            let generation = self.generation;
+            for key in pending {
+                self.handle_key(key);
+                if self.generation != generation {
+                    break;
+                }
+            }
+            changed = true;
+        }
         changed
     }
 
@@ -212,16 +234,7 @@ impl App {
         if !self.contains(word) {
             return;
         }
-        self.history.push_back(Location {
-            input: self.input.clone(),
-            cursor: self.cursor,
-            results: self.results.clone(),
-            selected: self.selected,
-            preview: self.preview.clone(),
-            scroll: self.scroll,
-            focus: self.focus,
-            loading: self.loading,
-        });
+        self.history.push_back(self.location());
         if self.history.len() > 64 {
             self.history.pop_front();
         }
@@ -231,10 +244,29 @@ impl App {
         self.search();
     }
 
+    fn location(&self) -> Location {
+        Location {
+            input: self.input.clone(),
+            cursor: self.cursor,
+            results: self.results.clone(),
+            selected: self.selected,
+            preview: self.preview.clone(),
+            scroll: self.scroll,
+            focus: self.focus,
+            loading: self.loading,
+        }
+    }
+
     pub fn back(&mut self) {
         let Some(old) = self.history.pop_back() else {
             return;
         };
+        self.restore(old);
+    }
+
+    fn restore(&mut self, old: Location) {
+        self.completion = None;
+        self.pending_completion.clear();
         self.generation += 1;
         self.input = old.input;
         self.cursor = old.cursor;
@@ -259,7 +291,102 @@ impl App {
         }
     }
 
+    pub(crate) fn inline_suffix(&self) -> Option<String> {
+        if self.focus != Focus::Input
+            || self.cursor != self.input.len()
+            || self.input.is_empty()
+            || self.input.ends_with(char::is_whitespace)
+        {
+            return None;
+        }
+        let candidate = self.results.get(self.selected)?;
+        let query = normalize(&self.input);
+        let suffix = candidate.key.strip_prefix(&query)?;
+        if suffix.is_empty() {
+            None
+        } else {
+            Some(suffix.into())
+        }
+    }
+
+    fn accept(&mut self, reading: bool) {
+        let Some(candidate) = self.results.get(self.selected) else {
+            return;
+        };
+        let word = candidate.headword.clone();
+        let restart = self.input != word || self.completion.is_some();
+        self.input = word;
+        self.cursor = self.input.len();
+        if restart {
+            self.search();
+        }
+        if reading {
+            self.focus = Focus::Definition;
+        }
+    }
+
+    fn cycle_completion(&mut self, reverse: bool) {
+        if self.results.is_empty() {
+            return;
+        }
+        if self.completion.is_none() {
+            self.completion = Some(Completion {
+                original: self.location(),
+                index: None,
+            });
+            if self.results.len() == 1 {
+                self.fill_completion(0);
+                return;
+            }
+            let query = normalize(&self.input);
+            if let Some(common) = self.lexicon.common_prefix(&query)
+                && common.len() > query.len()
+            {
+                self.input = common;
+                self.cursor = self.input.len();
+            }
+            if !reverse {
+                return;
+            }
+        }
+        let current = self.completion.as_ref().unwrap().index;
+        let count = self.results.len();
+        let next = match current {
+            None => {
+                if reverse {
+                    count - 1
+                } else {
+                    0
+                }
+            }
+            Some(i) => {
+                if reverse {
+                    (i + count - 1) % count
+                } else {
+                    (i + 1) % count
+                }
+            }
+        };
+        self.fill_completion(next);
+    }
+
+    fn fill_completion(&mut self, index: usize) {
+        self.completion.as_mut().unwrap().index = Some(index);
+        self.input = self.results[index].headword.clone();
+        self.cursor = self.input.len();
+        self.select(index);
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) {
+        let completion_key = matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter)
+            || (key.code == KeyCode::Right && self.cursor == self.input.len())
+            || (key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL));
+        if self.focus == Focus::Input && self.loading && self.results.is_empty() && completion_key {
+            if self.pending_completion.len() < 64 {
+                self.pending_completion.push(key);
+            }
+            return;
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') => self.exit = true,
@@ -274,6 +401,18 @@ impl App {
                 KeyCode::Char('p') => self.select(self.selected.saturating_sub(1)),
                 KeyCode::Char('a') => self.cursor = 0,
                 KeyCode::Char('e') => self.cursor = self.input.len(),
+                KeyCode::Char('f') if self.inline_suffix().is_some() => self.accept(false),
+                KeyCode::Char('l') => {
+                    if self.completion.is_some() {
+                        self.accept(false);
+                    }
+                    self.pending_completion.clear();
+                    self.focus = if self.focus == Focus::Input {
+                        Focus::Definition
+                    } else {
+                        Focus::Input
+                    };
+                }
                 _ => {}
             }
             return;
@@ -311,18 +450,25 @@ impl App {
             return;
         }
         match key.code {
-            KeyCode::Tab | KeyCode::BackTab => {
-                self.focus = if self.focus == Focus::Input {
-                    Focus::Definition
-                } else {
-                    Focus::Input
-                }
-            }
+            KeyCode::Tab if self.focus == Focus::Input => self.cycle_completion(false),
+            KeyCode::BackTab if self.focus == Focus::Input => self.cycle_completion(true),
+            KeyCode::Enter if self.focus == Focus::Input => self.accept(true),
+            KeyCode::Down if self.completion.is_some() => self.cycle_completion(false),
+            KeyCode::Up if self.completion.is_some() => self.cycle_completion(true),
             KeyCode::Down => self.select(self.selected.saturating_add(1)),
             KeyCode::Up => self.select(self.selected.saturating_sub(1)),
             KeyCode::PageDown => self.scroll = (self.scroll + 10).min(self.max_scroll),
             KeyCode::PageUp => self.scroll = self.scroll.saturating_sub(10),
-            KeyCode::Esc => self.focus = Focus::Input,
+            KeyCode::Esc => {
+                self.pending_completion.clear();
+                if self.focus == Focus::Input {
+                    if let Some(completion) = self.completion.take() {
+                        self.restore(completion.original);
+                    }
+                } else {
+                    self.focus = Focus::Input;
+                }
+            }
             KeyCode::Char('f') if self.focus == Focus::Definition && self.preview.is_some() => {
                 self.picking = true;
                 self.label_input.clear();
@@ -340,7 +486,9 @@ impl App {
                     .map_or(0, |(i, _)| i)
             }
             KeyCode::Right if self.focus == Focus::Input => {
-                if let Some(c) = self.input[self.cursor..].chars().next() {
+                if self.inline_suffix().is_some() {
+                    self.accept(false);
+                } else if let Some(c) = self.input[self.cursor..].chars().next() {
                     self.cursor += c.len_utf8();
                 }
             }
