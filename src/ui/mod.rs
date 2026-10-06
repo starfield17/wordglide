@@ -110,7 +110,7 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
         Paragraph::new(help_lines.join("\n")).style(app.theme.dim()),
         rows[2],
     );
-    if app.show_help {
+    if app.view.show_help {
         render_help(frame, app);
     }
 }

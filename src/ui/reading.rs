@@ -1,4 +1,4 @@
-use crate::{App, Entry, theme::Theme};
+use crate::{App, Entry, app::ViewOptions, theme::Theme};
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
@@ -22,8 +22,7 @@ fn append_entry(
     entry: &Entry,
     related: bool,
     theme: Theme,
-    expand_ipa: bool,
-    expand_examples: bool,
+    view: ViewOptions,
 ) {
     if related {
         lines.push(ReadingLine {
@@ -42,7 +41,7 @@ fn append_entry(
             if senses.is_empty() {
                 continue;
             }
-            let ipa = if !expand_ipa && group.ipa.len() > 2 {
+            let ipa = if !view.expand_ipa && group.ipa.len() > 2 {
                 format!("{} …", group.ipa[..2].join(" · "))
             } else {
                 group.ipa.join(" · ")
@@ -71,7 +70,7 @@ fn append_entry(
                     text: format!("{}. {}{}", i + 1, sense.glosses.join(" › "), tags),
                     style: Style::default(),
                 });
-                if expand_examples {
+                if view.expand_examples {
                     for example in &sense.examples {
                         lines.push(ReadingLine {
                             text: format!("   • {}", example.text),
@@ -154,28 +153,14 @@ pub(super) fn reading_lines(app: &App) -> Vec<ReadingLine> {
             style: app.theme.accent(),
         });
         for related in &preview.related {
-            append_entry(
-                &mut lines,
-                related,
-                true,
-                app.theme,
-                app.expand_ipa,
-                app.expand_examples,
-            );
+            append_entry(&mut lines, related, true, app.theme, app.view);
         }
         lines.push(ReadingLine {
             text: format!("Original form: {}", preview.entry.headword),
             style: app.theme.dim(),
         });
     }
-    append_entry(
-        &mut lines,
-        &preview.entry,
-        false,
-        app.theme,
-        app.expand_ipa,
-        app.expand_examples,
-    );
+    append_entry(&mut lines, &preview.entry, false, app.theme, app.view);
     lines.push(ReadingLine {
         text: format!("Source: {}", preview.entry.source_url),
         style: app.theme.dim(),

@@ -119,9 +119,9 @@ impl Pointer {
 /// visible state changed. Motion and drag are ignored so `?1003h` traffic never
 /// forces a redraw.
 pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
-    if app.show_help {
+    if app.view.show_help {
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-            app.show_help = false;
+            app.view.show_help = false;
             return true;
         }
         return false;

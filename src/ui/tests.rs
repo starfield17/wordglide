@@ -657,8 +657,8 @@ fn collapsible_ipa_water() {
         .expect("group with 34 IPA variants");
     assert_eq!(group_with_34.ipa.len(), 34);
 
-    // Compact reading_lines (app.expand_ipa is false by default)
-    assert!(!app.expand_ipa);
+    // Compact reading_lines (app.view.expand_ipa is false by default)
+    assert!(!app.view.expand_ipa);
     let compact_lines = reading_lines(&app);
     let heading = compact_lines
         .iter()
@@ -683,8 +683,8 @@ fn collapsible_ipa_water() {
             .all(|variant| compact_lines.iter().any(|l| l.text.contains(variant)))
     );
 
-    // After setting app.expand_ipa = true the heading contains every variant
-    app.expand_ipa = true;
+    // After setting app.view.expand_ipa = true the heading contains every variant
+    app.view.expand_ipa = true;
     let expanded_lines = reading_lines(&app);
     let expanded_heading = expanded_lines
         .iter()
@@ -708,9 +708,9 @@ fn collapsible_ipa_water() {
     // Toggle via key 'p' in definition focus
     app.focus = Focus::Definition;
     stroke(&mut app, KeyCode::Char('p'));
-    assert!(!app.expand_ipa);
+    assert!(!app.view.expand_ipa);
     stroke(&mut app, KeyCode::Char('p'));
-    assert!(app.expand_ipa);
+    assert!(app.view.expand_ipa);
 }
 
 #[test]
@@ -719,7 +719,7 @@ fn collapsible_examples_and_references_a() {
     let mut app = App::new(dict, "a");
     settle(&mut app);
 
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_examples);
     let compact_lines = reading_lines(&app);
     assert!(
         compact_lines.iter().all(|l| !l.text.starts_with("     — ")),
@@ -740,8 +740,8 @@ fn collapsible_examples_and_references_a() {
     }
     assert!(current_sense_examples <= 1);
 
-    // After setting app.expand_examples = true, at least one "     — " line appears
-    app.expand_examples = true;
+    // After setting app.view.expand_examples = true, at least one "     — " line appears
+    app.view.expand_examples = true;
     let expanded_lines = reading_lines(&app);
     assert!(
         expanded_lines.iter().any(|l| l.text.starts_with("     — ")),
@@ -764,9 +764,9 @@ fn collapsible_examples_and_references_a() {
     // Toggle via key 'e' in definition focus
     app.focus = Focus::Definition;
     stroke(&mut app, KeyCode::Char('e'));
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_examples);
     stroke(&mut app, KeyCode::Char('e'));
-    assert!(app.expand_examples);
+    assert!(app.view.expand_examples);
 }
 
 #[test]
@@ -776,18 +776,18 @@ fn plain_e_and_p_in_input_focus_edits_query_instead_of_toggling() {
     settle(&mut app);
 
     assert_eq!(app.focus, Focus::Input);
-    assert!(!app.expand_ipa);
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_ipa);
+    assert!(!app.view.expand_examples);
 
     stroke(&mut app, KeyCode::Char('e'));
     assert_eq!(app.input, "wate");
-    assert!(!app.expand_ipa);
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_ipa);
+    assert!(!app.view.expand_examples);
 
     stroke(&mut app, KeyCode::Char('p'));
     assert_eq!(app.input, "watep");
-    assert!(!app.expand_ipa);
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_ipa);
+    assert!(!app.view.expand_examples);
 }
 
 #[test]
@@ -799,15 +799,15 @@ fn pressing_e_and_p_in_hint_picking_mode_does_not_toggle() {
     app.focus = Focus::Definition;
     stroke(&mut app, KeyCode::Char('f'));
     assert!(app.picking);
-    assert!(!app.expand_ipa);
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_ipa);
+    assert!(!app.view.expand_examples);
 
     stroke(&mut app, KeyCode::Char('p'));
-    assert!(!app.expand_ipa);
+    assert!(!app.view.expand_ipa);
     assert_eq!(app.label_input, "p");
 
     stroke(&mut app, KeyCode::Char('e'));
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_examples);
 }
 
 #[test]
@@ -819,10 +819,10 @@ fn definition_focus_without_preview_ignores_e_and_p() {
     assert!(app.preview.is_none());
 
     stroke(&mut app, KeyCode::Char('p'));
-    assert!(!app.expand_ipa);
+    assert!(!app.view.expand_ipa);
 
     stroke(&mut app, KeyCode::Char('e'));
-    assert!(!app.expand_examples);
+    assert!(!app.view.expand_examples);
 }
 
 #[test]
@@ -1033,16 +1033,19 @@ fn help_overlay_toggles_and_renders() {
 
     // F1 opens from input focus; Esc closes.
     stroke(&mut app, KeyCode::F(1));
-    assert!(app.show_help);
+    assert!(app.view.show_help);
     stroke(&mut app, KeyCode::Esc);
-    assert!(!app.show_help);
+    assert!(!app.view.show_help);
 
     // '?' opens from definition focus and any key other than Esc is swallowed.
     app.focus = Focus::Definition;
     stroke(&mut app, KeyCode::Char('?'));
-    assert!(app.show_help);
+    assert!(app.view.show_help);
     stroke(&mut app, KeyCode::Char('x'));
-    assert!(app.show_help, "plain keys must not type while help is open");
+    assert!(
+        app.view.show_help,
+        "plain keys must not type while help is open"
+    );
 
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
     let mut pointer = Pointer::default();
@@ -1061,5 +1064,5 @@ fn help_overlay_toggles_and_renders() {
     );
 
     stroke(&mut app, KeyCode::Esc);
-    assert!(!app.show_help);
+    assert!(!app.view.show_help);
 }
