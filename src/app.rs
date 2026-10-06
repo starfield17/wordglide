@@ -58,6 +58,8 @@ pub struct App {
     pub(crate) max_scroll: usize,
     pub(crate) page: usize,
     pub(crate) theme: Theme,
+    pub(crate) expand_ipa: bool,
+    pub(crate) expand_examples: bool,
     lexicon: Arc<Index>,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
@@ -120,6 +122,8 @@ impl App {
             max_scroll: 0,
             page: 10,
             theme: Theme::colored(),
+            expand_ipa: false,
+            expand_examples: false,
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -579,6 +583,12 @@ impl App {
             KeyCode::Char('f') if self.focus == Focus::Definition && self.preview.is_some() => {
                 self.picking = true;
                 self.label_input.clear();
+            }
+            KeyCode::Char('p') if self.focus == Focus::Definition && self.preview.is_some() => {
+                self.expand_ipa = !self.expand_ipa;
+            }
+            KeyCode::Char('e') if self.focus == Focus::Definition && self.preview.is_some() => {
+                self.expand_examples = !self.expand_examples;
             }
             KeyCode::Home if self.focus == Focus::Definition => self.scroll = 0,
             KeyCode::End if self.focus == Focus::Definition => self.scroll = self.max_scroll,

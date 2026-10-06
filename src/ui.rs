@@ -139,7 +139,14 @@ impl Pointer {
     }
 }
 
-fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool, theme: Theme) {
+fn append_entry(
+    lines: &mut Vec<ReadingLine>,
+    entry: &Entry,
+    related: bool,
+    theme: Theme,
+    expand_ipa: bool,
+    expand_examples: bool,
+) {
     if related {
         lines.push(ReadingLine {
             text: format!("→ {}", entry.headword),
@@ -157,12 +164,17 @@ fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool, them
             if senses.is_empty() {
                 continue;
             }
+            let ipa = if !expand_ipa && group.ipa.len() > 2 {
+                format!("{} …", group.ipa[..2].join(" · "))
+            } else {
+                group.ipa.join(" · ")
+            };
             lines.push(ReadingLine {
                 text: format!(
                     "{}  {}  {}{}",
                     group.headword,
                     group.pos,
-                    group.ipa.join(" · "),
+                    ipa,
                     if historical {
                         "  [archaic / obsolete]"
                     } else {
@@ -181,17 +193,24 @@ fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool, them
                     text: format!("{}. {}{}", i + 1, sense.glosses.join(" › "), tags),
                     style: Style::default(),
                 });
-                for example in &sense.examples {
+                if expand_examples {
+                    for example in &sense.examples {
+                        lines.push(ReadingLine {
+                            text: format!("   • {}", example.text),
+                            style: theme.example(),
+                        });
+                        if !example.reference.is_empty() {
+                            lines.push(ReadingLine {
+                                text: format!("     — {}", example.reference),
+                                style: theme.dim(),
+                            });
+                        }
+                    }
+                } else if let Some(example) = sense.examples.first() {
                     lines.push(ReadingLine {
                         text: format!("   • {}", example.text),
                         style: theme.example(),
                     });
-                    if !example.reference.is_empty() {
-                        lines.push(ReadingLine {
-                            text: format!("     — {}", example.reference),
-                            style: theme.dim(),
-                        });
-                    }
                 }
                 lines.push(ReadingLine {
                     text: String::new(),
@@ -236,14 +255,28 @@ fn reading_lines(app: &App) -> Vec<ReadingLine> {
             style: app.theme.accent(),
         });
         for related in &preview.related {
-            append_entry(&mut lines, related, true, app.theme);
+            append_entry(
+                &mut lines,
+                related,
+                true,
+                app.theme,
+                app.expand_ipa,
+                app.expand_examples,
+            );
         }
         lines.push(ReadingLine {
             text: format!("Original form: {}", preview.entry.headword),
             style: app.theme.dim(),
         });
     }
-    append_entry(&mut lines, &preview.entry, false, app.theme);
+    append_entry(
+        &mut lines,
+        &preview.entry,
+        false,
+        app.theme,
+        app.expand_ipa,
+        app.expand_examples,
+    );
     lines.push(ReadingLine {
         text: format!("Source: {}", preview.entry.source_url),
         style: app.theme.dim(),
@@ -427,14 +460,28 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
         ));
     }
     let panes = if area.width >= 80 {
+        let longest = app
+            .results
+            .iter()
+            .map(|c| c.headword.width())
+            .max()
+            .unwrap_or(0);
+        let min_w = (area.width as usize * 18) / 100;
+        let max_w = (area.width as usize * 40) / 100;
+        let width = ((longest + 4).clamp(min_w, max_w).max(16)) as u16;
         Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(25), Constraint::Percentage(75)])
+            .constraints([Constraint::Length(width), Constraint::Min(1)])
             .split(rows[1])
     } else {
+        let max_height = (rows[1].height / 2)
+            .max(4)
+            .min(rows[1].height.saturating_sub(3));
+        let min_height = 4.min(max_height);
+        let height = ((app.results.len() + 2) as u16).clamp(min_height, max_height);
         Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .constraints([Constraint::Length(height), Constraint::Min(1)])
             .split(rows[1])
     };
     pointer.definition = Region::from(panes[1]);
@@ -653,6 +700,18 @@ fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<String> {
                 priority: 1,
             },
             HelpSegment {
+                text: "e examples".into(),
+                line: 0,
+                order: 5,
+                priority: 9,
+            },
+            HelpSegment {
+                text: "p IPA".into(),
+                line: 0,
+                order: 6,
+                priority: 10,
+            },
+            HelpSegment {
                 text: "Ctrl+L focus".into(),
                 line: 1,
                 order: 0,
@@ -780,18 +839,36 @@ fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Poi
     pointer.candidates_len = app.results.len();
 }
 
+pub(crate) fn scroll_percent(scroll: usize, max_scroll: usize) -> Option<usize> {
+    if max_scroll == 0 {
+        return None;
+    }
+    let percent = ((scroll as f64 / max_scroll as f64) * 100.0).round() as usize;
+    Some(percent.min(100))
+}
+
 fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut Pointer) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" Definition ")
-        .border_style(app.theme.border(app.focus == Focus::Definition));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
+    let initial_block = Block::default().borders(Borders::ALL);
+    let inner = initial_block.inner(area);
     // A page keeps one line of overlap so no definition line is skipped.
     app.page = inner.height.saturating_sub(1).max(1) as usize;
     let lines = wrap(reading_lines(app), inner.width as usize);
     app.max_scroll = lines.len().saturating_sub(inner.height as usize);
     app.scroll = app.scroll.min(app.max_scroll);
+
+    let title = match &app.preview {
+        None => " Definition ".to_string(),
+        Some(preview) => match scroll_percent(app.scroll, app.max_scroll) {
+            None => format!(" Definition · {} ", preview.entry.headword),
+            Some(pct) => format!(" Definition · {} · {}% ", preview.entry.headword, pct),
+        },
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(title)
+        .border_style(app.theme.border(app.focus == Focus::Definition));
+    frame.render_widget(block, area);
+
     let visible: Vec<_> = lines
         .iter()
         .skip(app.scroll)
@@ -1534,7 +1611,7 @@ mod tests {
                     );
                     if width >= 120 && height >= 12 {
                         let expected = vec![
-                            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input".to_string(),
+                            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input · e examples · p IPA".to_string(),
                             format!(
                                 "Ctrl+L focus · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+C quit{}",
                                 app.history_len(),
@@ -1616,5 +1693,316 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn collapsible_ipa_water() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "water");
+        settle(&mut app);
+
+        let preview = app.preview.as_ref().expect("preview for water");
+        let group_with_34 = preview
+            .entry
+            .groups
+            .iter()
+            .find(|g| g.ipa.len() == 34)
+            .expect("group with 34 IPA variants");
+        assert_eq!(group_with_34.ipa.len(), 34);
+
+        // Compact reading_lines (app.expand_ipa is false by default)
+        assert!(!app.expand_ipa);
+        let compact_lines = reading_lines(&app);
+        let heading = compact_lines
+            .iter()
+            .find(|l| {
+                l.text.starts_with(&format!(
+                    "{}  {}  ",
+                    group_with_34.headword, group_with_34.pos
+                ))
+            })
+            .expect("group heading line");
+        assert!(heading.text.ends_with('…'));
+        assert!(
+            !group_with_34
+                .ipa
+                .iter()
+                .all(|variant| heading.text.contains(variant))
+        );
+        assert!(
+            !group_with_34
+                .ipa
+                .iter()
+                .all(|variant| compact_lines.iter().any(|l| l.text.contains(variant)))
+        );
+
+        // After setting app.expand_ipa = true the heading contains every variant
+        app.expand_ipa = true;
+        let expanded_lines = reading_lines(&app);
+        let expanded_heading = expanded_lines
+            .iter()
+            .find(|l| {
+                l.text.starts_with(&format!(
+                    "{}  {}  ",
+                    group_with_34.headword, group_with_34.pos
+                ))
+            })
+            .expect("expanded group heading line");
+        for variant in &group_with_34.ipa {
+            assert!(
+                expanded_heading.text.contains(variant),
+                "expanded heading must contain variant {variant}"
+            );
+        }
+        assert_eq!(heading.text.matches(" · ").count(), 1);
+        assert_eq!(expanded_heading.text.matches(" · ").count(), 33);
+        assert!(!expanded_heading.text.ends_with('…'));
+
+        // Toggle via key 'p' in definition focus
+        app.focus = Focus::Definition;
+        stroke(&mut app, KeyCode::Char('p'));
+        assert!(!app.expand_ipa);
+        stroke(&mut app, KeyCode::Char('p'));
+        assert!(app.expand_ipa);
+    }
+
+    #[test]
+    fn collapsible_examples_and_references_a() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "a");
+        settle(&mut app);
+
+        assert!(!app.expand_examples);
+        let compact_lines = reading_lines(&app);
+        assert!(
+            compact_lines.iter().all(|l| !l.text.starts_with("     — ")),
+            "compact reading_lines must contain no line starting with '     — '"
+        );
+
+        let mut current_sense_examples = 0;
+        for line in &compact_lines {
+            if line.text.is_empty() {
+                assert!(
+                    current_sense_examples <= 1,
+                    "each sense must have at most one example line, got {current_sense_examples}"
+                );
+                current_sense_examples = 0;
+            } else if line.text.starts_with("   • ") {
+                current_sense_examples += 1;
+            }
+        }
+        assert!(current_sense_examples <= 1);
+
+        // After setting app.expand_examples = true, at least one "     — " line appears
+        app.expand_examples = true;
+        let expanded_lines = reading_lines(&app);
+        assert!(
+            expanded_lines.iter().any(|l| l.text.starts_with("     — ")),
+            "expanded reading_lines must contain at least one reference line"
+        );
+
+        // In expanded mode, at least one sense has more than one example
+        let mut max_sense_examples = 0;
+        let mut count = 0;
+        for line in &expanded_lines {
+            if line.text.is_empty() {
+                max_sense_examples = max_sense_examples.max(count);
+                count = 0;
+            } else if line.text.starts_with("   • ") {
+                count += 1;
+            }
+        }
+        assert!(max_sense_examples > 1);
+
+        // Toggle via key 'e' in definition focus
+        app.focus = Focus::Definition;
+        stroke(&mut app, KeyCode::Char('e'));
+        assert!(!app.expand_examples);
+        stroke(&mut app, KeyCode::Char('e'));
+        assert!(app.expand_examples);
+    }
+
+    #[test]
+    fn plain_e_and_p_in_input_focus_edits_query_instead_of_toggling() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "wat");
+        settle(&mut app);
+
+        assert_eq!(app.focus, Focus::Input);
+        assert!(!app.expand_ipa);
+        assert!(!app.expand_examples);
+
+        stroke(&mut app, KeyCode::Char('e'));
+        assert_eq!(app.input, "wate");
+        assert!(!app.expand_ipa);
+        assert!(!app.expand_examples);
+
+        stroke(&mut app, KeyCode::Char('p'));
+        assert_eq!(app.input, "watep");
+        assert!(!app.expand_ipa);
+        assert!(!app.expand_examples);
+    }
+
+    #[test]
+    fn pressing_e_and_p_in_hint_picking_mode_does_not_toggle() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "water");
+        settle(&mut app);
+
+        app.focus = Focus::Definition;
+        stroke(&mut app, KeyCode::Char('f'));
+        assert!(app.picking);
+        assert!(!app.expand_ipa);
+        assert!(!app.expand_examples);
+
+        stroke(&mut app, KeyCode::Char('p'));
+        assert!(!app.expand_ipa);
+        assert_eq!(app.label_input, "p");
+
+        stroke(&mut app, KeyCode::Char('e'));
+        assert!(!app.expand_examples);
+    }
+
+    #[test]
+    fn definition_focus_without_preview_ignores_e_and_p() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "");
+        settle(&mut app);
+        app.focus = Focus::Definition;
+        assert!(app.preview.is_none());
+
+        stroke(&mut app, KeyCode::Char('p'));
+        assert!(!app.expand_ipa);
+
+        stroke(&mut app, KeyCode::Char('e'));
+        assert!(!app.expand_examples);
+    }
+
+    #[test]
+    fn scroll_percent_acceptance() {
+        assert_eq!(scroll_percent(0, 0), None);
+        assert_eq!(scroll_percent(0, 10), Some(0));
+        assert_eq!(scroll_percent(5, 10), Some(50));
+        assert_eq!(scroll_percent(10, 10), Some(100));
+    }
+
+    #[test]
+    fn definition_title_shows_headword_and_scroll_progress() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "water");
+        settle(&mut app);
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        // Frame 1: water at scroll 0 shows the word "water" in the definition-pane title area
+        let def_x = pointer.definition.x;
+        let def_w = pointer.definition.width;
+        let def_top_y = pointer.definition.y;
+        let buffer = terminal.backend().buffer();
+        let mut title_row = String::new();
+        for x in def_x..def_x + def_w {
+            title_row.push_str(buffer[(x, def_top_y)].symbol());
+        }
+        assert!(
+            title_row.contains("water"),
+            "definition title must contain 'water': {title_row}"
+        );
+        assert!(
+            title_row.contains("0%"),
+            "definition title at scroll 0 must contain '0%': {title_row}"
+        );
+
+        // Frame 2: repeats after scrolling to the end with "100%"
+        assert!(app.max_scroll > 0);
+        app.scroll = app.max_scroll;
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        let buffer = terminal.backend().buffer();
+        let mut scrolled_title_row = String::new();
+        for x in def_x..def_x + def_w {
+            scrolled_title_row.push_str(buffer[(x, def_top_y)].symbol());
+        }
+        assert!(
+            scrolled_title_row.contains("water"),
+            "scrolled definition title must contain 'water': {scrolled_title_row}"
+        );
+        assert!(
+            scrolled_title_row.contains("100%"),
+            "scrolled definition title must contain '100%': {scrolled_title_row}"
+        );
+    }
+
+    #[test]
+    fn adaptive_candidate_pane_size_narrow_60x24() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "ho");
+        settle(&mut app);
+
+        let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        // A rendered 60x24 frame for ho shows at least 3 candidate rows
+        // (count distinct candidate labels in the candidates pane inner area), up from 1.
+        let buffer = terminal.backend().buffer();
+        let mut distinct_candidates = std::collections::HashSet::new();
+        for y in pointer.candidates.y..pointer.candidates.y + pointer.candidates.height {
+            let mut row = String::new();
+            for x in pointer.candidates.x..pointer.candidates.x + pointer.candidates.width {
+                row.push_str(buffer[(x, y)].symbol());
+            }
+            let trimmed = row.trim();
+            if !trimmed.is_empty() {
+                distinct_candidates.insert(trimmed.to_string());
+            }
+        }
+        assert!(
+            distinct_candidates.len() >= 3,
+            "expected at least 3 distinct candidate labels in candidate pane inner area, got {}: {:?}",
+            distinct_candidates.len(),
+            distinct_candidates
+        );
+    }
+
+    #[test]
+    fn adaptive_candidate_pane_size_wide_120x40() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "ho");
+        settle(&mut app);
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        // A rendered 120x40 frame for a query whose candidates are all short (e.g. ho)
+        // gives the definition pane more columns than the old 75% (90 cols).
+        assert!(
+            pointer.definition.width > 90,
+            "definition pane width {} must exceed old 75% (90 columns)",
+            pointer.definition.width
+        );
+
+        // A query with a long candidate (e.g. fist-fighting if present) does not exceed 40% for the candidate pane.
+        let (_dir2, dict_fist) = dictionary();
+        let mut app_fist = App::new(dict_fist, "fist");
+        settle(&mut app_fist);
+        if !app_fist.results.iter().any(|c| c.headword.width() >= 30) {
+            app_fist.results.push(crate::Candidate {
+                key: "fist-fighting".into(),
+                headword: "fist-fighting-champion-of-the-world".into(),
+                score: 100,
+                kind: crate::MatchKind::Exact,
+            });
+        }
+        let mut pointer_fist = Pointer::default();
+        paint(&mut app_fist, &mut terminal, &mut pointer_fist);
+
+        let candidate_width = pointer_fist.definition.x;
+        assert!(
+            candidate_width <= 48,
+            "candidate pane width {candidate_width} must not exceed 40% of 120 (48 columns)"
+        );
     }
 }

@@ -70,6 +70,20 @@ fn assert_no_disallowed_colors(terminal: &Terminal<TestBackend>) {
     }
 }
 
+fn definition_border_x(terminal: &Terminal<TestBackend>) -> u16 {
+    let buffer = terminal.backend().buffer();
+    let mut count = 0;
+    for x in 0..buffer.area.width {
+        if buffer[(x, 3)].symbol() == "┌" {
+            count += 1;
+            if count == 2 {
+                return x;
+            }
+        }
+    }
+    panic!("second '┌' on border row 3 not found");
+}
+
 #[test]
 fn colored_app_uses_expected_accent_and_dim_colors() {
     let (_dir, dict) = dictionary();
@@ -84,7 +98,7 @@ fn colored_app_uses_expected_accent_and_dim_colors() {
     assert_eq!(buffer[(0, 0)].fg, Color::Cyan);
 
     // Idle border of definition pane has DarkGray.
-    let def_border_x = 30; // 25% of 120
+    let def_border_x = definition_border_x(&terminal);
     assert_eq!(buffer[(def_border_x, 3)].fg, Color::DarkGray);
 
     // Candidate highlight row has Black on Cyan.
@@ -123,6 +137,7 @@ fn colored_app_uses_expected_accent_and_dim_colors() {
     assert_eq!(app.focus, Focus::Definition);
     terminal.draw(|f| draw(f, &mut app)).unwrap();
     let buffer = terminal.backend().buffer();
+    let def_border_x = definition_border_x(&terminal);
     assert_eq!(buffer[(def_border_x, 3)].fg, Color::Cyan);
 
     // Hint picking mode: labels use Black on Yellow with BOLD.
