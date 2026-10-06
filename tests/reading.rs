@@ -42,6 +42,10 @@ fn control(app: &mut App, code: KeyCode) {
     app.handle_key(KeyEvent::new(code, KeyModifiers::CONTROL));
 }
 
+fn alt(app: &mut App, code: KeyCode) {
+    app.handle_key(KeyEvent::new(code, KeyModifiers::ALT));
+}
+
 #[test]
 fn real_source_pack_supports_forms_phrases_and_no_rewrites() {
     let (_dir, mut dict) = dictionary();
@@ -179,15 +183,72 @@ fn definition_focus_ignores_plain_letters_and_input_shortcuts() {
         KeyCode::Char('a'),
         KeyCode::Char('e'),
         KeyCode::Char('f'),
+        KeyCode::Char('w'),
+        KeyCode::Char('k'),
+        KeyCode::Left,
+        KeyCode::Right,
     ] {
         control(&mut app, code);
     }
+    alt(&mut app, KeyCode::Backspace);
+    alt(&mut app, KeyCode::Right);
 
     assert_eq!(app.input, "fist");
     assert_eq!(app.cursor, 2);
     assert_eq!(app.focus, Focus::Definition);
     assert_eq!(app.scroll, 0);
     assert!(!app.picking);
+}
+
+#[test]
+fn word_level_editing_and_alt_right_history() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "take off");
+    settle(&mut app);
+    assert_eq!(app.cursor, 8);
+
+    control(&mut app, KeyCode::Char('w'));
+    settle(&mut app);
+    assert_eq!(app.input, "take ");
+    assert_eq!(app.cursor, 5);
+    assert_eq!(app.preview.as_ref().unwrap().entry.key, "take");
+
+    app.paste("off");
+    settle(&mut app);
+    assert_eq!(app.input, "take off");
+
+    control(&mut app, KeyCode::Left);
+    assert_eq!(
+        app.cursor, 5,
+        "Ctrl+Left crosses the space to the word start"
+    );
+    control(&mut app, KeyCode::Right);
+    assert_eq!(
+        app.cursor, 8,
+        "Ctrl+Right crosses the space to the next word"
+    );
+
+    control(&mut app, KeyCode::Left);
+    control(&mut app, KeyCode::Char('k'));
+    settle(&mut app);
+    assert_eq!(app.input, "take ");
+
+    app.paste("off");
+    settle(&mut app);
+    assert_eq!(app.input, "take off");
+    alt(&mut app, KeyCode::Backspace);
+    settle(&mut app);
+    assert_eq!(app.input, "take ");
+
+    app.jump_to("hand");
+    settle(&mut app);
+    assert_eq!(app.input, "hand");
+    alt(&mut app, KeyCode::Left);
+    settle(&mut app);
+    assert_eq!(app.input, "take ");
+    alt(&mut app, KeyCode::Right);
+    settle(&mut app);
+    assert_eq!(app.input, "hand");
 }
 
 #[test]

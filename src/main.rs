@@ -21,6 +21,9 @@ struct Args {
     /// Disable colored output.
     #[arg(long)]
     no_color: bool,
+    /// Disable mouse capture, keeping native terminal text selection.
+    #[arg(long)]
+    no_mouse: bool,
 }
 
 fn main() -> Result<()> {
@@ -28,7 +31,10 @@ fn main() -> Result<()> {
     let executable = std::env::current_exe().context("Cannot locate executable")?;
     let user_data = ProjectDirs::from("org", "local-english-dict", "dict")
         .map(|d| d.data_dir().join("english"));
-    let path = resolve_data(args.data, &executable, user_data)?;
+    let env_data = std::env::var_os("WORDGLIDE_DATA")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let path = resolve_data(args.data, env_data, &executable, user_data)?;
     if args.verify_data {
         verify_pack(&path)?;
         println!("Data pack verified");
@@ -36,7 +42,12 @@ fn main() -> Result<()> {
     }
     let dict = Dictionary::open(&path)?;
     let color = color_enabled(args.no_color);
-    run(dict, args.query.as_deref().unwrap_or(""), color)
+    run(
+        dict,
+        args.query.as_deref().unwrap_or(""),
+        color,
+        !args.no_mouse,
+    )
 }
 
 fn color_enabled(no_color_flag: bool) -> bool {
@@ -52,10 +63,14 @@ fn color_enabled_from(no_color_flag: bool, no_color_env: Option<&std::ffi::OsStr
 
 fn resolve_data(
     explicit: Option<PathBuf>,
+    env_data: Option<PathBuf>,
     executable: &Path,
     user_data: Option<PathBuf>,
 ) -> Result<PathBuf> {
     if let Some(path) = explicit {
+        return Ok(path);
+    }
+    if let Some(path) = env_data {
         return Ok(path);
     }
     let executable = executable
@@ -78,24 +93,41 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn explicit_then_adjacent_then_user_data_without_silent_corrupt_fallback() {
+    fn explicit_then_env_then_adjacent_then_user_data_without_silent_corrupt_fallback() {
         let dir = tempfile::tempdir().unwrap();
         let executable = dir.path().join("wordglide");
         fs::write(&executable, "fixture").unwrap();
         let user_data = dir.path().join("user-data");
         assert_eq!(
-            resolve_data(None, &executable, Some(user_data.clone())).unwrap(),
+            resolve_data(None, None, &executable, Some(user_data.clone())).unwrap(),
             user_data
+        );
+        let from_env = dir.path().join("env-data");
+        assert_eq!(
+            resolve_data(
+                None,
+                Some(from_env.clone()),
+                &executable,
+                Some(user_data.clone())
+            )
+            .unwrap(),
+            from_env
         );
         let adjacent = dir.path().canonicalize().unwrap().join("english-pack");
         fs::write(&adjacent, "invalid pack is still selected for validation").unwrap();
         assert_eq!(
-            resolve_data(None, &executable, Some(user_data.clone())).unwrap(),
+            resolve_data(None, None, &executable, Some(user_data.clone())).unwrap(),
             adjacent
         );
         let explicit = dir.path().join("explicit");
         assert_eq!(
-            resolve_data(Some(explicit.clone()), &executable, Some(user_data.clone())).unwrap(),
+            resolve_data(
+                Some(explicit.clone()),
+                Some(from_env.clone()),
+                &executable,
+                Some(user_data.clone())
+            )
+            .unwrap(),
             explicit
         );
         #[cfg(unix)]
@@ -105,7 +137,7 @@ mod tests {
             let link = links.join("wordglide");
             std::os::unix::fs::symlink(&executable, &link).unwrap();
             assert_eq!(
-                resolve_data(None, &link, Some(user_data)).unwrap(),
+                resolve_data(None, None, &link, Some(user_data)).unwrap(),
                 adjacent
             );
         }

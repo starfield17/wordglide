@@ -13,7 +13,7 @@ use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
@@ -221,6 +221,32 @@ fn append_entry(
     }
 }
 
+fn empty_state(app: &App) -> String {
+    if app.loading {
+        return "Looking up…".into();
+    }
+    let query = crate::normalize(&app.input);
+    if query.is_empty() {
+        "Start typing an English word or phrase.".into()
+    } else if query.chars().count() < 3 {
+        format!("No entry starts with \"{query}\". Spelling suggestions need at least 3 letters.")
+    } else {
+        format!("No entry matches \"{query}\". Check the spelling.")
+    }
+}
+
+/// Dim every reading line so a retained definition reads as stale while a new
+/// query is in flight.
+fn stale_style(lines: Vec<ReadingLine>) -> Vec<ReadingLine> {
+    lines
+        .into_iter()
+        .map(|mut line| {
+            line.style = line.style.add_modifier(Modifier::DIM);
+            line
+        })
+        .collect()
+}
+
 fn reading_lines(app: &App) -> Vec<ReadingLine> {
     let mut lines = vec![];
     if let Some(error) = &app.error {
@@ -228,20 +254,15 @@ fn reading_lines(app: &App) -> Vec<ReadingLine> {
             text: error.clone(),
             style: app.theme.error(),
         });
-        return lines;
     }
     let Some(preview) = &app.preview else {
-        let text = if app.loading {
-            "Looking up…"
-        } else if app.input.is_empty() {
-            "Start typing an English word or phrase."
-        } else {
-            "No matching words."
-        };
-        return vec![ReadingLine {
-            text: text.into(),
-            style: app.theme.dim(),
-        }];
+        if lines.is_empty() {
+            lines.push(ReadingLine {
+                text: empty_state(app),
+                style: app.theme.dim(),
+            });
+        }
+        return lines;
     };
     if !preview.related.is_empty() {
         let relations = preview
@@ -852,7 +873,11 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut
     let inner = initial_block.inner(area);
     // A page keeps one line of overlap so no definition line is skipped.
     app.page = inner.height.saturating_sub(1).max(1) as usize;
-    let lines = wrap(reading_lines(app), inner.width as usize);
+    let mut content = reading_lines(app);
+    if app.loading && app.preview.is_some() {
+        content = stale_style(content);
+    }
+    let lines = wrap(content, inner.width as usize);
     app.max_scroll = lines.len().saturating_sub(inner.height as usize);
     app.scroll = app.scroll.min(app.max_scroll);
 
@@ -998,7 +1023,7 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn run(dictionary: Dictionary, query: &str, color: bool) -> Result<()> {
+pub fn run(dictionary: Dictionary, query: &str, color: bool, mouse: bool) -> Result<()> {
     let mut app = App::new(dictionary, query);
     app.set_color(color);
     let old_hook = std::panic::take_hook();
@@ -1014,12 +1039,10 @@ pub fn run(dictionary: Dictionary, query: &str, color: bool) -> Result<()> {
     }));
     enable_raw_mode()?;
     let _guard = TerminalGuard;
-    execute!(
-        io::stdout(),
-        EnterAlternateScreen,
-        EnableBracketedPaste,
-        MOUSE_ON
-    )?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
+    if mouse {
+        execute!(io::stdout(), MOUSE_ON)?;
+    }
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     let mut pointer = Pointer::default();
     let mut dirty = true;
@@ -2004,5 +2027,77 @@ mod tests {
             candidate_width <= 48,
             "candidate pane width {candidate_width} must not exceed 40% of 120 (48 columns)"
         );
+    }
+
+    #[test]
+    fn typing_keeps_the_previous_definition_until_the_response_arrives() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        let previous = app.preview.as_ref().unwrap().entry.key.clone();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert!(app.loading, "typing starts a new lookup");
+        assert_eq!(
+            app.preview.as_ref().map(|p| p.entry.key.as_str()),
+            Some(previous.as_str()),
+            "the old definition stays visible while loading"
+        );
+        settle(&mut app);
+        assert_eq!(app.input, "fistx");
+    }
+
+    #[test]
+    fn error_banner_keeps_the_last_definition() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        let headword = app.preview.as_ref().unwrap().entry.headword.clone();
+        app.loading = false;
+        app.error = Some("worker hiccup".into());
+
+        let text: Vec<_> = reading_lines(&app).into_iter().map(|l| l.text).collect();
+        assert!(text[0].contains("worker hiccup"), "{text:?}");
+        assert!(
+            text.iter().any(|l| l.contains(&headword)),
+            "definition must survive an error: {text:?}"
+        );
+    }
+
+    #[test]
+    fn error_without_a_preview_does_not_append_the_empty_state() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        app.preview = None;
+        app.error = Some("worker hiccup".into());
+
+        let text: Vec<_> = reading_lines(&app).into_iter().map(|l| l.text).collect();
+        assert_eq!(text, vec!["worker hiccup".to_string()]);
+    }
+
+    #[test]
+    fn empty_state_explains_short_queries_and_spelling() {
+        for (query, expected) in [
+            ("xq", "at least 3 letters"),
+            ("xqzwpy", "Check the spelling"),
+        ] {
+            let (_dir, dict) = dictionary();
+            let mut app = App::new(dict, query);
+            settle(&mut app);
+            let text: String = reading_lines(&app).into_iter().map(|l| l.text).collect();
+            assert!(text.contains(expected), "{query}: {text:?}");
+        }
+    }
+
+    #[test]
+    fn stale_style_adds_dim_without_dropping_colour() {
+        let styled = ReadingLine {
+            text: "house".into(),
+            style: Style::default().fg(ratatui::style::Color::Cyan),
+        };
+        let stale = stale_style(vec![styled]);
+        assert!(stale[0].style.add_modifier.contains(Modifier::DIM));
+        assert_eq!(stale[0].style.fg, Some(ratatui::style::Color::Cyan));
     }
 }

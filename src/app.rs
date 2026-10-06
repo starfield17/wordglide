@@ -9,6 +9,54 @@ use std::{
 /// Cap on remembered navigation steps in either direction.
 const HISTORY_LIMIT: usize = 64;
 
+fn word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '\''
+}
+
+/// Byte offset of the start of the word before `cursor`, skipping whitespace.
+fn prev_word_boundary(text: &str, cursor: usize) -> usize {
+    let mut index = cursor.min(text.len());
+    while index > 0 {
+        let previous = text[..index].chars().next_back().unwrap();
+        if previous.is_whitespace() {
+            index -= previous.len_utf8();
+        } else {
+            break;
+        }
+    }
+    while index > 0 {
+        let previous = text[..index].chars().next_back().unwrap();
+        if word_char(previous) {
+            index -= previous.len_utf8();
+        } else {
+            break;
+        }
+    }
+    index
+}
+
+/// Byte offset of the end of the next word after `cursor`, skipping whitespace.
+fn next_word_boundary(text: &str, cursor: usize) -> usize {
+    let mut index = cursor.min(text.len());
+    while index < text.len() {
+        let next = text[index..].chars().next().unwrap();
+        if next.is_whitespace() {
+            index += next.len_utf8();
+        } else {
+            break;
+        }
+    }
+    while index < text.len() {
+        let next = text[index..].chars().next().unwrap();
+        if word_char(next) {
+            index += next.len_utf8();
+        } else {
+            break;
+        }
+    }
+    index
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
     Input,
@@ -181,7 +229,6 @@ impl App {
         self.selected = 0;
         self.scroll = 0;
         self.max_scroll = 0;
-        self.preview = None;
         self.results.clear();
         self.error = None;
         self.picking = false;
@@ -271,7 +318,6 @@ impl App {
         self.selected = selected;
         self.scroll = 0;
         self.max_scroll = 0;
-        self.preview = None;
         self.error = None;
         self.loading = true;
         self.picking = false;
@@ -499,6 +545,22 @@ impl App {
                 KeyCode::Char('a') if self.focus == Focus::Input => self.cursor = 0,
                 KeyCode::Char('e') if self.focus == Focus::Input => self.cursor = self.input.len(),
                 KeyCode::Char('f') if self.focus == Focus::Input => self.accept_inline(),
+                KeyCode::Char('w') if self.focus == Focus::Input => {
+                    let previous = prev_word_boundary(&self.input, self.cursor);
+                    self.input.drain(previous..self.cursor);
+                    self.cursor = previous;
+                    self.search();
+                }
+                KeyCode::Char('k') if self.focus == Focus::Input => {
+                    self.input.truncate(self.cursor);
+                    self.search();
+                }
+                KeyCode::Left if self.focus == Focus::Input => {
+                    self.cursor = prev_word_boundary(&self.input, self.cursor);
+                }
+                KeyCode::Right if self.focus == Focus::Input => {
+                    self.cursor = next_word_boundary(&self.input, self.cursor);
+                }
                 KeyCode::Char('l') => {
                     if self.completion.is_some() {
                         self.accept(false);
@@ -514,8 +576,18 @@ impl App {
             }
             return;
         }
-        if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Left {
-            self.back();
+        if key.modifiers.contains(KeyModifiers::ALT) {
+            match key.code {
+                KeyCode::Left => self.back(),
+                KeyCode::Right => self.forward(),
+                KeyCode::Backspace if self.focus == Focus::Input => {
+                    let previous = prev_word_boundary(&self.input, self.cursor);
+                    self.input.drain(previous..self.cursor);
+                    self.cursor = previous;
+                    self.search();
+                }
+                _ => {}
+            }
             return;
         }
         if self.picking {
@@ -649,5 +721,34 @@ impl App {
             self.cursor += clean.len();
             self.search();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn word_boundaries_skip_whitespace_and_punctuation() {
+        let text = "take off now";
+        assert_eq!(prev_word_boundary(text, text.len()), 9);
+        assert_eq!(prev_word_boundary(text, 9), 5);
+        assert_eq!(prev_word_boundary(text, 5), 0);
+        assert_eq!(prev_word_boundary(text, 0), 0);
+        assert_eq!(next_word_boundary(text, 0), 4);
+        assert_eq!(next_word_boundary(text, 4), 8);
+        assert_eq!(next_word_boundary(text, 8), 12);
+        assert_eq!(next_word_boundary(text, text.len()), text.len());
+    }
+
+    #[test]
+    fn word_boundaries_are_utf8_safe() {
+        let text = "café résumé";
+        let end = text.len();
+        let resume = prev_word_boundary(text, end);
+        assert_eq!(&text[resume..end], "résumé");
+        let before_resume = prev_word_boundary(text, resume);
+        assert_eq!(before_resume, 0);
+        assert_eq!(next_word_boundary(text, 0), "café".len());
     }
 }
