@@ -545,6 +545,22 @@ impl App {
             }
             return;
         }
+        if key.code == KeyCode::F(1) {
+            self.show_help = !self.show_help;
+            return;
+        }
+        // The help overlay is modal: only Ctrl+C and the closing keys act.
+        if self.show_help
+            && !(key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c'))
+        {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter | KeyCode::Char(' ')
+            ) {
+                self.show_help = false;
+            }
+            return;
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
                 KeyCode::Char('c') => self.exit = true,
@@ -603,19 +619,6 @@ impl App {
                     self.search();
                 }
                 _ => {}
-            }
-            return;
-        }
-        if key.code == KeyCode::F(1) {
-            self.show_help = !self.show_help;
-            return;
-        }
-        if self.show_help {
-            if matches!(
-                key.code,
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter | KeyCode::Char(' ')
-            ) {
-                self.show_help = false;
             }
             return;
         }

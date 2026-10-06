@@ -229,9 +229,9 @@ fn empty_state(app: &App) -> String {
     if query.is_empty() {
         "Start typing an English word or phrase.".into()
     } else if query.chars().count() < 3 {
-        format!("No entry starts with \"{query}\". Spelling suggestions need at least 3 letters.")
+        format!("No word starts with \"{query}\". Spelling suggestions need at least 3 letters.")
     } else {
-        format!("No entry matches \"{query}\". Check the spelling.")
+        format!("No matching words for \"{query}\". Check the spelling.")
     }
 }
 
