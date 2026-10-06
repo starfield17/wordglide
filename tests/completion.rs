@@ -242,3 +242,27 @@ fn pending_ghost_acceptance_uses_new_results_and_fuzzy_has_no_suffix() {
     settle(&mut fuzzy);
     assert_eq!(ghost(&mut fuzzy), "");
 }
+
+#[test]
+fn ghost_prefers_plain_words_and_hides_weaker_extensions() {
+    // A plain single word beats a hyphenated compound of the same prefix.
+    {
+        let (_dir, mut app) = app(&[("ho", 0), ("ho-use", 500), ("home", 90)], "ho");
+        settle(&mut app);
+        assert_eq!(ghost(&mut app), "me");
+    }
+
+    // An extension that does not score above the exact match shows nothing.
+    {
+        let (_dir, mut app) = app(&[("ho", 100), ("home", 50)], "ho");
+        settle(&mut app);
+        assert_eq!(ghost(&mut app), "");
+    }
+
+    // A stronger extension is still predicted.
+    {
+        let (_dir, mut app) = app(&[("ho", 0), ("home", 50)], "ho");
+        settle(&mut app);
+        assert_eq!(ghost(&mut app), "me");
+    }
+}

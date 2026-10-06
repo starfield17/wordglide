@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use directories::ProjectDirs;
-use local_english_dict::{Dictionary, run, verify_pack};
+use local_english_dict::{Dictionary, PackInfo, pack_info, run, verify_pack};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -18,6 +18,9 @@ struct Args {
     /// Verify all data checksums, indexes, and database integrity, then exit.
     #[arg(long, conflicts_with = "query")]
     verify_data: bool,
+    /// Print pack metadata and exit.
+    #[arg(long, conflicts_with_all = ["query", "verify_data"])]
+    info: bool,
     /// Disable colored output.
     #[arg(long)]
     no_color: bool,
@@ -35,9 +38,17 @@ fn main() -> Result<()> {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
     let path = resolve_data(args.data, env_data, &executable, user_data)?;
+    if args.info {
+        print_pack_info(&path, &pack_info(&path)?);
+        return Ok(());
+    }
     if args.verify_data {
-        verify_pack(&path)?;
-        println!("Data pack verified");
+        let started = std::time::Instant::now();
+        let entries = verify_pack(&path)?;
+        println!(
+            "Data pack verified: {entries} entries checked in {:.1}s",
+            started.elapsed().as_secs_f64()
+        );
         return Ok(());
     }
     let dict = Dictionary::open(&path)?;
@@ -52,6 +63,19 @@ fn main() -> Result<()> {
 
 fn color_enabled(no_color_flag: bool) -> bool {
     color_enabled_from(no_color_flag, std::env::var_os("NO_COLOR").as_deref())
+}
+
+fn print_pack_info(path: &Path, info: &PackInfo) {
+    println!("Pack:         {}", path.display());
+    println!("Schema:       {}", info.schema_version);
+    println!("Entries:      {}", info.candidate_count);
+    println!("Snapshot:     {}", info.snapshot);
+    println!("Source:       {} <{}>", info.source, info.source_url);
+    println!("Input sha256: {}", info.input_sha256);
+    for license in &info.licenses {
+        println!("Data license: {license}");
+    }
+    println!("Code license: {}", env!("CARGO_PKG_LICENSE"));
 }
 
 fn color_enabled_from(no_color_flag: bool, no_color_env: Option<&std::ffi::OsStr>) -> bool {
@@ -83,7 +107,7 @@ fn resolve_data(
         }
     }
     user_data.context(
-        "Cannot determine data directory; download the with-data bundle, or use --data DIRECTORY",
+        "Cannot determine data directory; set WORDGLIDE_DATA, pass --data DIRECTORY, or use a downloaded with-data bundle",
     )
 }
 

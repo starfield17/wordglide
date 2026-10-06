@@ -108,6 +108,7 @@ pub struct App {
     pub(crate) theme: Theme,
     pub(crate) expand_ipa: bool,
     pub(crate) expand_examples: bool,
+    pub(crate) show_help: bool,
     lexicon: Arc<Index>,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
@@ -172,6 +173,7 @@ impl App {
             theme: Theme::colored(),
             expand_ipa: false,
             expand_examples: false,
+            show_help: false,
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -423,10 +425,24 @@ impl App {
         let extends = |candidate: &&Candidate| {
             candidate.key.len() > query.len() && candidate.key.starts_with(&query)
         };
-        self.results
+        // Prefer a plain single word over hyphenated or multi-word compounds so
+        // the ghost does not predict an obscure `house-like` over `household`.
+        let plain =
+            |candidate: &&Candidate| extends(candidate) && !candidate.key.contains(['-', ' ']);
+        let candidate = self
+            .results
             .get(self.selected)
-            .filter(extends)
-            .or_else(|| self.results.iter().find(extends))
+            .filter(|candidate| plain(candidate))
+            .or_else(|| self.results.iter().find(|candidate| plain(candidate)))
+            .or_else(|| self.results.get(self.selected).filter(extends))
+            .or_else(|| self.results.iter().find(extends))?;
+        // Suppress a suggestion that is not more useful than the exact match.
+        if let Some(exact) = self.results.iter().find(|candidate| candidate.key == query)
+            && candidate.score <= exact.score
+        {
+            return None;
+        }
+        Some(candidate)
     }
 
     pub(crate) fn inline_suffix(&self) -> Option<String> {
@@ -590,6 +606,19 @@ impl App {
             }
             return;
         }
+        if key.code == KeyCode::F(1) {
+            self.show_help = !self.show_help;
+            return;
+        }
+        if self.show_help {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter | KeyCode::Char(' ')
+            ) {
+                self.show_help = false;
+            }
+            return;
+        }
         if self.picking {
             match key.code {
                 KeyCode::Esc | KeyCode::Tab => {
@@ -661,6 +690,9 @@ impl App {
             }
             KeyCode::Char('e') if self.focus == Focus::Definition && self.preview.is_some() => {
                 self.expand_examples = !self.expand_examples;
+            }
+            KeyCode::Char('?') if self.focus == Focus::Definition => {
+                self.show_help = true;
             }
             KeyCode::Home if self.focus == Focus::Definition => self.scroll = 0,
             KeyCode::End if self.focus == Focus::Definition => self.scroll = self.max_scroll,

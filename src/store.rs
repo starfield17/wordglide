@@ -27,7 +27,7 @@ pub struct Dictionary {
 impl Dictionary {
     /// Open with lightweight structural checks. Use `verify_pack` for full integrity verification.
     pub fn open(path: &Path) -> Result<Self> {
-        let manifest:Manifest=serde_json::from_slice(&fs::read(path.join("manifest.json")).with_context(||format!("No data pack at {}. Download and unpack a Wordglide with-data release, or use --data DIRECTORY. See README.md.",path.display()))?)?;
+        let manifest:Manifest=serde_json::from_slice(&fs::read(path.join("manifest.json")).with_context(||format!("No data pack at {}. Download the Wordglide with-data release, set WORDGLIDE_DATA, pass --data DIRECTORY, or place english-pack beside the executable. See README.md.",path.display()))?)?;
         ensure!(
             manifest.schema_version == SCHEMA_VERSION,
             "Incompatible data pack version {}; expected {}. Download a new data pack; old formats are not supported.",
@@ -200,8 +200,68 @@ impl Dictionary {
     }
 }
 
+/// Human-readable metadata about a prepared data pack.
+#[derive(Debug, Clone)]
+pub struct PackInfo {
+    pub schema_version: u32,
+    pub candidate_count: usize,
+    pub snapshot: String,
+    pub source: String,
+    pub source_url: String,
+    pub input_sha256: String,
+    pub licenses: Vec<String>,
+}
+
+/// Read pack metadata without opening the SQLite database or the indexes.
+pub fn pack_info(path: &Path) -> Result<PackInfo> {
+    let manifest: Manifest = serde_json::from_slice(
+        &fs::read(path.join("manifest.json")).with_context(|| {
+            format!(
+                "No data pack at {}. Download the Wordglide with-data release, set WORDGLIDE_DATA, pass --data DIRECTORY, or place english-pack beside the executable. See README.md.",
+                path.display()
+            )
+        })?,
+    )?;
+    let field = |key: &str| {
+        manifest
+            .source
+            .get(key)
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown")
+            .to_string()
+    };
+    let licenses = manifest
+        .source
+        .get("licenses")
+        .and_then(|value| value.as_array())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    let license = entry.get("license")?.as_str()?;
+                    let data = entry.get("data").and_then(|value| value.as_str());
+                    Some(match data {
+                        Some(data) if !data.is_empty() => format!("{license} ({data})"),
+                        _ => license.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(PackInfo {
+        schema_version: manifest.schema_version,
+        candidate_count: manifest.candidate_count,
+        snapshot: field("snapshot"),
+        source: field("source"),
+        source_url: field("source_url"),
+        input_sha256: field("input_sha256"),
+        licenses,
+    })
+}
+
 /// Explicit full-pack verification. Never called by normal application startup.
-pub fn verify_pack(path: &Path) -> Result<()> {
+/// Returns the number of verified entries.
+pub fn verify_pack(path: &Path) -> Result<usize> {
     let manifest: Manifest = serde_json::from_slice(&fs::read(path.join("manifest.json"))?)?;
     let dict = Dictionary::open(path)?;
     for name in ["entries.sqlite", "words.fst", "lexicon.bin"] {
@@ -233,5 +293,5 @@ pub fn verify_pack(path: &Path) -> Result<()> {
         );
     }
     ensure!(rows.next()?.is_none(), "Unexpected database entries");
-    Ok(())
+    Ok(dict.index.len())
 }

@@ -15,7 +15,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 use std::{collections::HashMap, fmt, io, time::Duration};
 use unicode_segmentation::UnicodeSegmentation;
@@ -513,6 +513,67 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
         Paragraph::new(help_lines.join("\n")).style(app.theme.dim()),
         rows[2],
     );
+    if app.show_help {
+        render_help(frame, app);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(vertical[1])[1]
+}
+
+fn help_lines(theme: Theme) -> Vec<Line<'static>> {
+    let heading = |text: &str| Line::styled(text.to_string(), theme.heading());
+    let body = |text: &str| Line::styled(text.to_string(), Style::default());
+    vec![
+        heading("Lookup"),
+        body("  Type to search · Enter accept and read · Ctrl+L switch focus"),
+        body("  ↑/↓ or Ctrl+P/N select · Tab/Shift+Tab complete · → or Ctrl+F accept prediction"),
+        heading("Reading"),
+        body("  PgUp/PgDn or wheel scroll · Home/End top/bottom"),
+        body("  f follow a visible word (type the two hint letters)"),
+        body("  e examples and references: compact / full"),
+        body("  p pronunciation (IPA): short / full"),
+        heading("Input editing"),
+        body("  Ctrl+W or Alt+Backspace delete word · Ctrl+K kill to end"),
+        body("  Ctrl+←/→ word motion · Alt+←/→ history back / forward"),
+        body("  Ctrl+A start · Ctrl+E end · Ctrl+U clear · Esc cancel"),
+        heading("Mouse"),
+        body("  Click the definition to focus; a second click on a word follows it"),
+        body("  Click a candidate to preview; click it again to accept"),
+        heading("Other"),
+        body("  Ctrl+Z back · Ctrl+Y forward · Ctrl+C quit · ? or F1 this help"),
+    ]
+}
+
+fn render_help(frame: &mut Frame, app: &App) {
+    let area = centered_rect(88, 84, frame.area());
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Keys · Esc closes ")
+        .border_style(app.theme.focused_border());
+    frame.render_widget(
+        Paragraph::new(help_lines(app.theme))
+            .block(block)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
 }
 
 #[derive(Clone, Debug)]
@@ -733,6 +794,12 @@ fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<String> {
                 priority: 10,
             },
             HelpSegment {
+                text: "? help".into(),
+                line: 0,
+                order: 7,
+                priority: 11,
+            },
+            HelpSegment {
                 text: "Ctrl+L focus".into(),
                 line: 1,
                 order: 0,
@@ -789,6 +856,12 @@ fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<String> {
                 line: 0,
                 order: 4,
                 priority: 9,
+            },
+            HelpSegment {
+                text: "F1 help".into(),
+                line: 0,
+                order: 5,
+                priority: 10,
             },
             HelpSegment {
                 text: "f follow".into(),
@@ -941,6 +1014,13 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut
 /// visible state changed. Motion and drag are ignored so `?1003h` traffic never
 /// forces a redraw.
 fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
+    if app.show_help {
+        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+            app.show_help = false;
+            return true;
+        }
+        return false;
+    }
     match mouse.kind {
         MouseEventKind::ScrollUp => return app.scroll_by(-(WHEEL_LINES as isize)),
         MouseEventKind::ScrollDown => return app.scroll_by(WHEEL_LINES as isize),
@@ -1595,7 +1675,7 @@ mod tests {
                     );
                     if width >= 120 && height >= 12 {
                         let expected = vec![
-                            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll".to_string(),
+                            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll · F1 help".to_string(),
                             format!(
                                 "f follow · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+U new · Ctrl+C quit{}",
                                 app.history_len(),
@@ -1634,7 +1714,7 @@ mod tests {
                     );
                     if width >= 120 && height >= 12 {
                         let expected = vec![
-                            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input · e examples · p IPA".to_string(),
+                            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input · e examples · p IPA · ? help".to_string(),
                             format!(
                                 "Ctrl+L focus · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+C quit{}",
                                 app.history_len(),
@@ -2099,5 +2179,44 @@ mod tests {
         let stale = stale_style(vec![styled]);
         assert!(stale[0].style.add_modifier.contains(Modifier::DIM));
         assert_eq!(stale[0].style.fg, Some(ratatui::style::Color::Cyan));
+    }
+
+    #[test]
+    fn help_overlay_toggles_and_renders() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+
+        // F1 opens from input focus; Esc closes.
+        stroke(&mut app, KeyCode::F(1));
+        assert!(app.show_help);
+        stroke(&mut app, KeyCode::Esc);
+        assert!(!app.show_help);
+
+        // '?' opens from definition focus and any key other than Esc is swallowed.
+        app.focus = Focus::Definition;
+        stroke(&mut app, KeyCode::Char('?'));
+        assert!(app.show_help);
+        stroke(&mut app, KeyCode::Char('x'));
+        assert!(app.show_help, "plain keys must not type while help is open");
+
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(text.contains("Keys"), "help overlay title missing");
+        assert!(
+            text.contains("Ctrl+W"),
+            "help overlay must document word editing"
+        );
+
+        stroke(&mut app, KeyCode::Esc);
+        assert!(!app.show_help);
     }
 }

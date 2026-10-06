@@ -242,3 +242,27 @@ fn damaged_fst_nodes_fail_open_without_a_query_panic() {
         assert!(Dictionary::open(&dir.path().join("pack")).is_err());
     }
 }
+
+#[test]
+fn pack_info_reports_metadata_and_verify_counts_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/sample");
+    let out = dir.path().join("pack");
+    build_pack(
+        &sample.join("entries.jsonl"),
+        &sample.join("source.json"),
+        &out,
+    )
+    .unwrap();
+
+    let info = local_english_dict::pack_info(&out).unwrap();
+    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.candidate_count, 89);
+    assert_eq!(info.snapshot, "2026-09-02-sampled-2026-10-06");
+    assert!(info.source.contains("Wiktionary"));
+    assert!(!info.licenses.is_empty());
+    assert!(info.licenses.iter().any(|l| l.contains("CC BY-SA")));
+
+    assert_eq!(local_english_dict::verify_pack(&out).unwrap(), 89);
+    assert!(local_english_dict::pack_info(&dir.path().join("missing")).is_err());
+}
