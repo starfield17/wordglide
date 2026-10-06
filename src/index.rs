@@ -193,14 +193,15 @@ mod tests {
         for (i, w) in words.iter().enumerate() {
             builder.insert(&w.key, i as u64).unwrap();
         }
-        let index = Index::new(words, builder.into_inner().unwrap()).unwrap();
+        let index = Index::open(Index::encode(&words).unwrap(), builder.into_inner().unwrap()).unwrap();
+        index.verify().unwrap();
         for query in ["h", "h0", "h00", "h001", "h199", "not"] {
-            let mut reference: Vec<_> = (0..index.words.len())
-                .filter(|&i| index.words[i].key.starts_with(query))
+            let mut reference: Vec<_> = (0..words.len())
+                .filter(|&i| words[i].key.starts_with(query))
                 .collect();
-            reference.sort_by_key(|&i| (Reverse(index.words[i].score), i));
+            reference.sort_by_key(|&i| (Reverse(words[i].score), i));
             reference.truncate(20);
-            assert_eq!(index.prefix(query, 20), reference);
+            assert_eq!(index.prefix(query, 20).unwrap(), reference);
         }
     }
 }
