@@ -165,3 +165,73 @@ fn queued_accept_does_not_replay_old_tabs_against_accepted_query() {
         "queued tab leaked into the accepted query"
     );
 }
+
+fn ghost(app: &mut App) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    terminal.draw(|f| draw(f, app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    (1..79)
+        .filter(|&x| buffer[(x, 1)].fg == Color::DarkGray)
+        .map(|x| buffer[(x, 1)].symbol())
+        .collect()
+}
+
+#[test]
+fn exact_match_keeps_preview_while_ghost_acceptance_uses_prefix_candidate() {
+    for (code, modifiers, accepted) in [
+        (KeyCode::Right, KeyModifiers::NONE, "home"),
+        (KeyCode::Char('f'), KeyModifiers::CONTROL, "home"),
+        (KeyCode::Enter, KeyModifiers::NONE, "ho"),
+    ] {
+        let (_dir, mut app) = app(&[("ho", 0), ("home", 100), ("house", 90)], "ho");
+        settle(&mut app);
+        let results = app.results.clone();
+        assert_eq!(ghost(&mut app), "me");
+        assert_eq!(app.input, "ho");
+        assert_eq!(app.results, results);
+        assert_eq!(app.results[app.selected].key, "ho");
+        assert_eq!(app.preview.as_ref().unwrap().entry.key, "ho");
+        app.handle_key(KeyEvent::new(code, modifiers));
+        settle(&mut app);
+        assert_eq!(app.input, accepted);
+        assert_eq!(app.preview.as_ref().unwrap().entry.key, accepted);
+        assert_eq!(app.focus, if code == KeyCode::Enter { Focus::Definition } else { Focus::Input });
+    }
+}
+
+#[test]
+fn selected_prefix_controls_ghost_and_display_guards_remain() {
+    let (_dir, mut app) = app(&[("ho", 0), ("home", 100), ("house", 90)], "ho");
+    settle(&mut app);
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Down);
+    settle(&mut app);
+    assert_eq!(app.results[app.selected].key, "house");
+    assert_eq!(ghost(&mut app), "use");
+    key(&mut app, KeyCode::Left);
+    assert_eq!(ghost(&mut app), "");
+    key(&mut app, KeyCode::Right);
+    assert_eq!(app.input, "ho");
+    assert_eq!(ghost(&mut app), "use");
+    key(&mut app, KeyCode::Right);
+    settle(&mut app);
+    assert_eq!(app.input, "house");
+    assert_eq!(ghost(&mut app), "");
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    assert_eq!(ghost(&mut app), "");
+    app.paste("ho ");
+    settle(&mut app);
+    assert_eq!(ghost(&mut app), "");
+}
+
+#[test]
+fn pending_ghost_acceptance_uses_new_results_and_fuzzy_has_no_suffix() {
+    let (_dir, mut pending) = app(&[("ho", 0), ("home", 100), ("homes", 90)], "ho");
+    pending.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    key(&mut pending, KeyCode::Tab);
+    settle(&mut pending);
+    assert_eq!(pending.input, "home");
+    let (_dir, mut fuzzy) = app(&[("house", 100)], "hosue");
+    settle(&mut fuzzy);
+    assert_eq!(ghost(&mut fuzzy), "");
+}
