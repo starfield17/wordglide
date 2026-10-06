@@ -18,6 +18,10 @@ input end or Ctrl+F. Prediction prefers the selected strict prefix extension,
 otherwise the first strict prefix extension in the ranked list; exact matches
 keep their selection and preview. Enter accepts candidate and focuses reading; Ctrl+L switches
 focus. Completion does not add lookup history or affect fixed ranking.
+Mouse: left click inside the definition pane focuses it; clicking a visible word
+there follows it when the pack contains it. The first click only focuses, so a
+single click never navigates. Clicks in the input box return focus without
+moving the cursor; motion/drag/scroll events are ignored and do not redraw.
 Distribution: public Wordglide repository; three download types (program, shared
 data, combined bundle). Adjacent english-pack auto-discovery precedes existing
 user-data directory; explicit --data wins. Runtime never downloads data.

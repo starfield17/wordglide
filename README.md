@@ -104,6 +104,8 @@ replaced with a newly built or downloaded pack.
 | `j` / `k` in definition | Scroll one line |
 | `f` in definition | Show two-letter hints on visible dictionary words |
 | Hint letters | Follow that word, without Enter |
+| Click in definition | Focus the definition pane |
+| Click a word in the focused definition | Follow that word |
 | Esc | Undo active completion, cancel hints, or return input focus |
 | Ctrl+O | Return to previous query, selection, focus, and scroll |
 | Ctrl+U | Clear input for another lookup |
@@ -128,6 +130,13 @@ Hints highlight the first two letters of a visible word and do not shift the
 text. Only words present in the local pack receive hints; one-letter tokens do
 not. Navigation history lives only in the current session. Narrow terminals use
 stacked panes; the minimum usable size is 30×10.
+
+Mouse works in two steps: the first click inside the definition pane focuses it,
+and clicking a visible word there follows it like a hint. Clicking the input box
+returns focus without moving the cursor. Only words present in the local pack
+respond, and the jump reuses the same session history as `Ctrl+O`. Mouse
+reporting is active while the UI runs, so terminals that also select text with
+the mouse need their bypass key (usually Shift) for native copy.
 
 ## Ranking and storage
 

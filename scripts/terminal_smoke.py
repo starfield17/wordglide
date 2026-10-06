@@ -44,6 +44,8 @@ def main():
             if process.poll() is not None or time.monotonic() > deadline:
                 raise AssertionError("Dictionary did not enter its terminal UI")
         print(f"Startup to terminal UI: {(time.monotonic() - started) * 1000:.3f} ms")
+        if b"\x1b[?1006h" not in output:
+            raise AssertionError("Mouse reporting was not enabled")
         os.write(master, args.query.encode("utf-8"))
         deadline = time.monotonic() + 5
         needle = args.needle.encode("utf-8")
@@ -60,6 +62,8 @@ def main():
             raise AssertionError("Terminal attributes were not restored")
         if b"\x1b[?1049l" not in output:
             raise AssertionError("Alternate screen was not restored")
+        if b"\x1b[?1006l" not in output:
+            raise AssertionError("Mouse reporting was not disabled")
         print(f"PASS: real PTY typed {args.query} without Enter, previewed expected source text, and restored terminal state")
         rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
         rss_mib = rss / (1024 * 1024 if sys.platform == "darwin" else 1024)

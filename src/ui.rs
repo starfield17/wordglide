@@ -1,7 +1,10 @@
 use crate::{App, Dictionary, Entry, Focus, MatchKind};
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind},
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyEventKind, MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -23,6 +26,108 @@ const ACCENT: Color = Color::Cyan;
 struct ReadingLine {
     text: String,
     style: Style,
+}
+
+// Screen regions and word positions from the most recent frame, filled during
+// rendering because ratatui performs no hit testing. Kept out of `App` so the
+// application state stays independent of the terminal backend.
+#[derive(Default, Clone, Copy)]
+struct Region {
+    x: u16,
+    y: u16,
+    width: u16,
+    height: u16,
+}
+
+impl Region {
+    fn contains(&self, column: u16, row: u16) -> bool {
+        self.width > 0
+            && self.height > 0
+            && column >= self.x
+            && column < self.x + self.width
+            && row >= self.y
+            && row < self.y + self.height
+    }
+}
+
+impl From<Rect> for Region {
+    fn from(area: Rect) -> Self {
+        Self {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: area.height,
+        }
+    }
+}
+
+struct HitToken {
+    start: u16,
+    end: u16,
+    word: String,
+}
+
+struct HitRow {
+    y: u16,
+    tokens: Vec<HitToken>,
+}
+
+#[derive(Default)]
+struct Pointer {
+    input: Region,
+    definition: Region,
+    rows: Vec<HitRow>,
+}
+
+impl Pointer {
+    fn reset(&mut self) {
+        self.input = Region::default();
+        self.definition = Region::default();
+        self.rows.clear();
+    }
+
+    fn record_rows(&mut self, inner: Rect, visible: &[&ReadingLine]) {
+        self.rows.clear();
+        for (i, line) in visible.iter().enumerate() {
+            let y = inner.y + i as u16;
+            let mut tokens = Vec::new();
+            let mut column = inner.x;
+            for token in line.text.split_word_bounds() {
+                let width = token.width() as u16;
+                // Whitespace and punctuation cannot be looked up; skip allocating
+                // hit targets for them.
+                if width > 0 && token.chars().any(char::is_alphanumeric) {
+                    tokens.push(HitToken {
+                        start: column,
+                        end: column + width,
+                        word: token.to_string(),
+                    });
+                }
+                column += width;
+            }
+            self.rows.push(HitRow { y, tokens });
+        }
+    }
+
+    fn definition_word(&self, column: u16, row: u16) -> Option<String> {
+        self.rows
+            .iter()
+            .find(|r| r.y == row)?
+            .tokens
+            .iter()
+            .find(|t| column >= t.start && column < t.end)
+            .map(|t| t.word.clone())
+    }
+
+    #[cfg(test)]
+    fn word_position(&self, word: &str) -> Option<(u16, u16)> {
+        for row in &self.rows {
+            if let Some(token) = row.tokens.iter().find(|t| t.word == word) {
+                return Some((token.start, row.y));
+            }
+        }
+        None
+    }
 }
 
 fn append_entry(lines: &mut Vec<ReadingLine>, entry: &Entry, related: bool) {
@@ -222,6 +327,12 @@ fn label_line(line: &ReadingLine, map: &HashMap<String, String>) -> Line<'static
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    let mut pointer = Pointer::default();
+    render(frame, app, &mut pointer);
+}
+
+fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
+    pointer.reset();
     let area = frame.area();
     if area.width < 30 || area.height < 10 {
         frame.render_widget(
@@ -238,6 +349,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             Constraint::Length(if area.height < 12 { 1 } else { 2 }),
         ])
         .split(area);
+    pointer.input = Region::from(rows[0]);
     let input_block = Block::default()
         .borders(Borders::ALL)
         .title(" Wordglide · English ")
@@ -280,8 +392,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             .constraints([Constraint::Length(3), Constraint::Min(1)])
             .split(rows[1])
     };
+    pointer.definition = Region::from(panes[1]);
     render_candidates(frame, app, panes[0]);
-    render_definition(frame, app, panes[1]);
+    render_definition(frame, app, panes[1], pointer);
     let help = if app.picking {
         format!(
             "Label: {}_  · type both letters · Esc cancels",
@@ -329,7 +442,7 @@ fn render_candidates(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_definition(frame: &mut Frame, app: &mut App, area: Rect) {
+fn render_definition(frame: &mut Frame, app: &mut App, area: Rect, pointer: &mut Pointer) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Definition ")
@@ -348,6 +461,7 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect) {
         .skip(app.scroll)
         .take(inner.height as usize)
         .collect();
+    pointer.record_rows(inner, &visible);
     let mut map = HashMap::new();
     app.labels.clear();
     if app.picking {
@@ -385,11 +499,51 @@ fn render_definition(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(Paragraph::new(rendered), inner);
 }
 
+/// Handle a mouse event against the last rendered layout. Returns whether the
+/// visible state changed. Motion and drag are ignored so `?1003h` traffic never
+/// forces a redraw.
+fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return false;
+    }
+    if pointer.definition.contains(mouse.column, mouse.row) {
+        if app.picking {
+            app.picking = false;
+            app.label_input.clear();
+            return true;
+        }
+        if app.focus != Focus::Definition {
+            app.focus = Focus::Definition;
+            return true;
+        }
+        if let Some(word) = pointer.definition_word(mouse.column, mouse.row)
+            && app.contains(&word)
+            && crate::normalize(&word) != crate::normalize(&app.input)
+        {
+            app.jump_to(&word);
+            return true;
+        }
+        return false;
+    }
+    if pointer.input.contains(mouse.column, mouse.row) && app.focus != Focus::Input {
+        app.focus = Focus::Input;
+        app.picking = false;
+        app.label_input.clear();
+        return true;
+    }
+    false
+}
+
 struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), DisableBracketedPaste, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
     }
 }
 
@@ -398,18 +552,29 @@ pub fn run(dictionary: Dictionary, query: &str) -> Result<()> {
     let old_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), DisableBracketedPaste, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         old_hook(info);
     }));
     enable_raw_mode()?;
     let _guard = TerminalGuard;
-    execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
+    execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        EnableBracketedPaste,
+        EnableMouseCapture
+    )?;
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    let mut pointer = Pointer::default();
     let mut dirty = true;
     while !app.exit {
         dirty |= app.poll();
         if dirty {
-            terminal.draw(|frame| draw(frame, &mut app))?;
+            terminal.draw(|frame| render(frame, &mut app, &mut pointer))?;
             dirty = false;
         }
         if event::poll(Duration::from_millis(5))? {
@@ -417,6 +582,9 @@ pub fn run(dictionary: Dictionary, query: &str) -> Result<()> {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     app.handle_key(key);
                     dirty = true;
+                }
+                Event::Mouse(mouse) => {
+                    dirty |= on_mouse(&mut app, &pointer, mouse);
                 }
                 Event::Paste(text) => {
                     app.paste(&text);
@@ -436,6 +604,50 @@ pub fn run(dictionary: Dictionary, query: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Dictionary, build_pack};
+    use crossterm::event::KeyModifiers;
+    use ratatui::backend::TestBackend;
+    use std::{
+        path::Path,
+        thread,
+        time::{Duration, Instant},
+    };
+
+    fn dictionary() -> (tempfile::TempDir, Dictionary) {
+        let dir = tempfile::tempdir().unwrap();
+        let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/sample");
+        let output = dir.path().join("pack");
+        build_pack(
+            &sample.join("entries.jsonl"),
+            &sample.join("source.json"),
+            &output,
+        )
+        .unwrap();
+        (dir, Dictionary::open(&output).unwrap())
+    }
+
+    fn settle(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while app.loading {
+            app.poll();
+            assert!(Instant::now() < deadline, "worker did not finish");
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert!(app.error.is_none(), "{:?}", app.error);
+    }
+
+    fn click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn paint(app: &mut App, terminal: &mut Terminal<TestBackend>, pointer: &mut Pointer) {
+        terminal.draw(|frame| render(frame, app, pointer)).unwrap();
+    }
 
     #[test]
     fn hard_line_breaks_and_source_controls() {
@@ -455,5 +667,88 @@ mod tests {
                 .iter()
                 .all(|line| !line.text.contains('\n') && !line.text.contains('\u{1b}'))
         );
+    }
+
+    #[test]
+    fn click_focuses_definition_then_jumps_to_the_visible_word() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        let (column, row) = pointer.word_position("hand").expect("visible word");
+        assert!(on_mouse(&mut app, &pointer, click(column, row)));
+        assert_eq!(app.focus, Focus::Definition);
+        assert_eq!(app.input, "fist");
+        assert_eq!(app.history_len(), 0);
+
+        paint(&mut app, &mut terminal, &mut pointer);
+        let (column, row) = pointer.word_position("hand").unwrap();
+        assert!(on_mouse(&mut app, &pointer, click(column, row)));
+        settle(&mut app);
+        assert_eq!(app.input, "hand");
+        assert_eq!(app.preview.as_ref().unwrap().entry.key, "hand");
+        assert_eq!(app.history_len(), 1);
+
+        app.back();
+        assert_eq!(app.input, "fist");
+        assert_eq!(app.focus, Focus::Definition);
+    }
+
+    #[test]
+    fn click_input_returns_focus_without_navigation() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        app.focus = Focus::Definition;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        let (column, row) = (pointer.input.x + 1, pointer.input.y + 1);
+        assert!(on_mouse(&mut app, &pointer, click(column, row)));
+        assert_eq!(app.focus, Focus::Input);
+        assert_eq!(app.history_len(), 0);
+    }
+
+    #[test]
+    fn click_without_a_dictionary_word_and_mouse_motion_do_nothing() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        app.focus = Focus::Definition;
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        let (column, row) = (pointer.definition.x, pointer.definition.y);
+        assert!(!on_mouse(&mut app, &pointer, click(column, row)));
+        let moved = MouseEvent {
+            kind: MouseEventKind::Moved,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(!on_mouse(&mut app, &pointer, moved));
+        assert_eq!(app.history_len(), 0);
+        assert_eq!(app.input, "fist");
+    }
+
+    #[test]
+    fn stacked_narrow_layout_click_targets_the_definition_pane() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+        let mut terminal = Terminal::new(TestBackend::new(60, 30)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+
+        assert!(pointer.definition.y > pointer.input.y);
+        let (column, row) = pointer.word_position("hand").expect("visible word");
+        assert!(on_mouse(&mut app, &pointer, click(column, row)));
+        assert_eq!(app.focus, Focus::Definition);
+        assert_eq!(app.input, "fist");
     }
 }

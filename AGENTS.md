@@ -10,7 +10,7 @@ including in this file. Keep environment selection outside the repository.
 - `src/lib.rs`: public contract; private modules enforce internal visibility.
 - `src/index.rs`: compact lexicon codec, prebuilt ranking, prefix top-k, fuzzy queries.
 - `src/store.rs`, `src/build.rs`: lightweight open, explicit full verification, pack assembly.
-- `src/app.rs`, `src/ui.rs`: navigation, asynchronous result ownership, rendering.
+- `src/app.rs`, `src/ui.rs`: navigation, asynchronous result ownership, rendering, and mouse hit-testing.
 - `scripts/prepare.py`: raw Wiktextract validation/normalization and wordfreq scoring.
 - `scripts/terminal_smoke.py`: actual POSIX PTY input and terminal restoration check.
 - `scripts/package.py`: validated program/data/bundle release archives.
