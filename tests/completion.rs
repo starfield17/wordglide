@@ -150,3 +150,18 @@ fn pending_completion_is_cancelled_by_new_input_and_empty_query_is_safe() {
     assert_eq!(app.input, "");
     assert_eq!(app.focus, Focus::Input);
 }
+
+#[test]
+fn queued_accept_does_not_replay_old_tabs_against_accepted_query() {
+    let (_dir, mut app) = app(&[("home", 100), ("homes", 90), ("honey", 80)], "ho");
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL));
+    key(&mut app, KeyCode::Tab);
+    settle(&mut app);
+    assert_eq!(app.input, "home");
+    key(&mut app, KeyCode::Tab);
+    key(&mut app, KeyCode::Tab);
+    assert_eq!(
+        app.input, "home",
+        "queued tab leaked into the accepted query"
+    );
+}
