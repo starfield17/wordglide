@@ -19,7 +19,7 @@ use ratatui::{
 };
 use std::{collections::HashMap, fmt, io, time::Duration};
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 const ACCENT: Color = Color::Cyan;
 
@@ -406,28 +406,310 @@ fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     pointer.definition = Region::from(panes[1]);
     render_candidates(frame, app, panes[0], pointer);
     render_definition(frame, app, panes[1], pointer);
-    let help = if app.picking {
-        format!(
-            "Label: {}_  · type both letters · PgUp/PgDn scroll · Esc cancels",
-            app.label_input
-        )
-    } else if app.focus == Focus::Definition {
-        format!(
-            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input\nCtrl+L focus · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+C quit{}",
-            app.history_len(),
-            if app.loading { " · loading…" } else { "" }
-        )
-    } else {
-        format!(
-            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll\nf follow · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+U new · Ctrl+C quit{}",
-            app.history_len(),
-            if app.loading { " · loading…" } else { "" }
-        )
-    };
+    let help_lines = footer_help(app, rows[2].width as usize, rows[2].height as usize);
     frame.render_widget(
-        Paragraph::new(help).style(Style::default().fg(Color::DarkGray)),
+        Paragraph::new(help_lines.join("\n")).style(Style::default().fg(Color::DarkGray)),
         rows[2],
     );
+}
+
+#[derive(Clone, Debug)]
+struct HelpSegment {
+    text: String,
+    line: usize,
+    order: usize,
+    priority: usize,
+}
+
+fn format_line(segments: &[&HelpSegment]) -> String {
+    segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+fn truncate_to_width(s: &str, max_width: usize) -> String {
+    let mut current_width = 0;
+    let mut result = String::new();
+    for c in s.chars() {
+        let w = c.width().unwrap_or(0);
+        if current_width + w > max_width {
+            break;
+        }
+        result.push(c);
+        current_width += w;
+    }
+    result
+}
+
+fn fit_segments<'a>(
+    mandatory: &[&'a HelpSegment],
+    candidates: &[&'a HelpSegment],
+    width: usize,
+    sort_by_line: bool,
+) -> Vec<&'a HelpSegment> {
+    let mut included = mandatory.to_vec();
+    for candidate in candidates {
+        let mut test_included = included.clone();
+        test_included.push(candidate);
+        if sort_by_line {
+            test_included.sort_by_key(|s| (s.line, s.order));
+        } else {
+            test_included.sort_by_key(|s| s.order);
+        }
+        if format_line(&test_included).width() <= width {
+            included = test_included;
+        }
+    }
+    if sort_by_line {
+        included.sort_by_key(|s| (s.line, s.order));
+    } else {
+        included.sort_by_key(|s| s.order);
+    }
+    included
+}
+
+fn format_footer_help(
+    segments: &[HelpSegment],
+    available_width: usize,
+    available_lines: usize,
+) -> Vec<String> {
+    if available_lines == 0 || available_width == 0 || segments.is_empty() {
+        return Vec::new();
+    }
+
+    let exit_seg = segments.iter().find(|s| s.priority == 0);
+
+    if available_lines == 1 {
+        let mandatory: Vec<&HelpSegment> = exit_seg.into_iter().collect();
+        let mut candidates: Vec<&HelpSegment> =
+            segments.iter().filter(|s| s.priority != 0).collect();
+        candidates.sort_by_key(|s| s.priority);
+
+        let included = fit_segments(&mandatory, &candidates, available_width, true);
+        let line = format_line(&included);
+        if line.width() <= available_width {
+            vec![line]
+        } else if let Some(exit) = exit_seg {
+            vec![truncate_to_width(&exit.text, available_width)]
+        } else {
+            vec![]
+        }
+    } else {
+        let max_line = segments.iter().map(|s| s.line).max().unwrap_or(0);
+        if max_line == 0 {
+            let mandatory: Vec<&HelpSegment> = exit_seg.into_iter().collect();
+            let mut candidates: Vec<&HelpSegment> =
+                segments.iter().filter(|s| s.priority != 0).collect();
+            candidates.sort_by_key(|s| s.priority);
+
+            let included = fit_segments(&mandatory, &candidates, available_width, false);
+            let line = format_line(&included);
+            if line.width() <= available_width {
+                vec![line]
+            } else if let Some(exit) = exit_seg {
+                vec![truncate_to_width(&exit.text, available_width)]
+            } else {
+                vec![]
+            }
+        } else {
+            let mandatory_l1: Vec<&HelpSegment> =
+                exit_seg.filter(|s| s.line == 1).into_iter().collect();
+            let mut candidates_l1: Vec<&HelpSegment> = segments
+                .iter()
+                .filter(|s| s.line == 1 && s.priority != 0)
+                .collect();
+            candidates_l1.sort_by_key(|s| s.priority);
+            let included_l1 = fit_segments(&mandatory_l1, &candidates_l1, available_width, false);
+
+            let mut candidates_l0: Vec<&HelpSegment> =
+                segments.iter().filter(|s| s.line == 0).collect();
+            candidates_l0.sort_by_key(|s| s.priority);
+            let included_l0 = fit_segments(&[], &candidates_l0, available_width, false);
+
+            let line0 = format_line(&included_l0);
+            let line1 = format_line(&included_l1);
+
+            let line0 = if line0.width() <= available_width {
+                line0
+            } else {
+                truncate_to_width(&line0, available_width)
+            };
+            let line1 = if line1.width() <= available_width {
+                line1
+            } else {
+                truncate_to_width(&line1, available_width)
+            };
+
+            if line0.is_empty() {
+                vec![line1]
+            } else {
+                vec![line0, line1]
+            }
+        }
+    }
+}
+
+fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<String> {
+    let segments = if app.picking {
+        vec![
+            HelpSegment {
+                text: format!("Label: {}_ ", app.label_input),
+                line: 0,
+                order: 0,
+                priority: 1,
+            },
+            HelpSegment {
+                text: "type both letters".into(),
+                line: 0,
+                order: 1,
+                priority: 3,
+            },
+            HelpSegment {
+                text: "PgUp/PgDn scroll".into(),
+                line: 0,
+                order: 2,
+                priority: 4,
+            },
+            HelpSegment {
+                text: "Esc cancels".into(),
+                line: 0,
+                order: 3,
+                priority: 2,
+            },
+            HelpSegment {
+                text: "Ctrl+C quit".into(),
+                line: 0,
+                order: 4,
+                priority: 0,
+            },
+        ]
+    } else if app.focus == Focus::Definition {
+        let loading_suffix = if app.loading { " · loading…" } else { "" };
+        vec![
+            HelpSegment {
+                text: "Reading".into(),
+                line: 0,
+                order: 0,
+                priority: 3,
+            },
+            HelpSegment {
+                text: "PgUp/PgDn or wheel scroll".into(),
+                line: 0,
+                order: 1,
+                priority: 6,
+            },
+            HelpSegment {
+                text: "Home/End top/bottom".into(),
+                line: 0,
+                order: 2,
+                priority: 8,
+            },
+            HelpSegment {
+                text: "f follow".into(),
+                line: 0,
+                order: 3,
+                priority: 2,
+            },
+            HelpSegment {
+                text: "Esc input".into(),
+                line: 0,
+                order: 4,
+                priority: 1,
+            },
+            HelpSegment {
+                text: "Ctrl+L focus".into(),
+                line: 1,
+                order: 0,
+                priority: 4,
+            },
+            HelpSegment {
+                text: format!("Ctrl+Z back ({})", app.history_len()),
+                line: 1,
+                order: 1,
+                priority: 5,
+            },
+            HelpSegment {
+                text: "Ctrl+Y forward".into(),
+                line: 1,
+                order: 2,
+                priority: 7,
+            },
+            HelpSegment {
+                text: format!("Ctrl+C quit{loading_suffix}"),
+                line: 1,
+                order: 3,
+                priority: 0,
+            },
+        ]
+    } else {
+        let loading_suffix = if app.loading { " · loading…" } else { "" };
+        vec![
+            HelpSegment {
+                text: "Tab complete".into(),
+                line: 0,
+                order: 0,
+                priority: 2,
+            },
+            HelpSegment {
+                text: "Shift+Tab previous".into(),
+                line: 0,
+                order: 1,
+                priority: 7,
+            },
+            HelpSegment {
+                text: "Enter read".into(),
+                line: 0,
+                order: 2,
+                priority: 1,
+            },
+            HelpSegment {
+                text: "Ctrl+L focus".into(),
+                line: 0,
+                order: 3,
+                priority: 4,
+            },
+            HelpSegment {
+                text: "PgUp/PgDn or wheel scroll".into(),
+                line: 0,
+                order: 4,
+                priority: 9,
+            },
+            HelpSegment {
+                text: "f follow".into(),
+                line: 1,
+                order: 0,
+                priority: 5,
+            },
+            HelpSegment {
+                text: format!("Ctrl+Z back ({})", app.history_len()),
+                line: 1,
+                order: 1,
+                priority: 6,
+            },
+            HelpSegment {
+                text: "Ctrl+Y forward".into(),
+                line: 1,
+                order: 2,
+                priority: 8,
+            },
+            HelpSegment {
+                text: "Ctrl+U new".into(),
+                line: 1,
+                order: 3,
+                priority: 3,
+            },
+            HelpSegment {
+                text: format!("Ctrl+C quit{loading_suffix}"),
+                line: 1,
+                order: 4,
+                priority: 0,
+            },
+        ]
+    };
+
+    format_footer_help(&segments, width, line_count)
 }
 
 fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Pointer) {
@@ -1008,5 +1290,166 @@ mod tests {
         assert!(!on_mouse(&mut app, &pointer, click(column, row)));
         assert_eq!(app.selected, selected);
         assert_eq!(app.input, "ho");
+    }
+
+    #[test]
+    fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+
+        let widths = [30, 45, 60, 80, 100, 120];
+        let heights = [10, 12, 24];
+
+        for &width in &widths {
+            for &height in &heights {
+                let line_count = if height < 12 { 1 } else { 2 };
+
+                // 1. Input focus
+                app.focus = Focus::Input;
+                app.picking = false;
+                for loading in [false, true] {
+                    app.loading = loading;
+                    let lines = footer_help(&app, width, line_count);
+
+                    assert!(
+                        lines.len() <= line_count,
+                        "Input lines count {} > available {line_count} at {width}x{height}",
+                        lines.len()
+                    );
+                    for line in &lines {
+                        assert!(
+                            line.width() <= width,
+                            "Input line '{line}' display width {} > {width} at {width}x{height}",
+                            line.width()
+                        );
+                    }
+                    assert!(
+                        lines.iter().any(|l| l.contains("Ctrl+C quit")),
+                        "Input exit hint missing at {width}x{height}: {lines:?}"
+                    );
+                    if width >= 120 && height >= 12 {
+                        let expected = vec![
+                            "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll".to_string(),
+                            format!(
+                                "f follow · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+U new · Ctrl+C quit{}",
+                                app.history_len(),
+                                if loading { " · loading…" } else { "" }
+                            ),
+                        ];
+                        assert_eq!(
+                            lines, expected,
+                            "Input full long-form mismatch at {width}x{height}"
+                        );
+                    }
+                }
+
+                // 2. Definition focus
+                app.focus = Focus::Definition;
+                app.picking = false;
+                for loading in [false, true] {
+                    app.loading = loading;
+                    let lines = footer_help(&app, width, line_count);
+
+                    assert!(
+                        lines.len() <= line_count,
+                        "Definition lines count {} > available {line_count} at {width}x{height}",
+                        lines.len()
+                    );
+                    for line in &lines {
+                        assert!(
+                            line.width() <= width,
+                            "Definition line '{line}' display width {} > {width} at {width}x{height}",
+                            line.width()
+                        );
+                    }
+                    assert!(
+                        lines.iter().any(|l| l.contains("Ctrl+C quit")),
+                        "Definition exit hint missing at {width}x{height}: {lines:?}"
+                    );
+                    if width >= 120 && height >= 12 {
+                        let expected = vec![
+                            "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input".to_string(),
+                            format!(
+                                "Ctrl+L focus · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+C quit{}",
+                                app.history_len(),
+                                if loading { " · loading…" } else { "" }
+                            ),
+                        ];
+                        assert_eq!(
+                            lines, expected,
+                            "Definition full long-form mismatch at {width}x{height}"
+                        );
+                    }
+                }
+
+                // 3. Label-picking
+                app.picking = true;
+                for label_input in ["", "a"] {
+                    app.label_input = label_input.to_string();
+                    let lines = footer_help(&app, width, line_count);
+
+                    assert!(
+                        lines.len() <= line_count,
+                        "Picking lines count {} > available {line_count} at {width}x{height}",
+                        lines.len()
+                    );
+                    for line in &lines {
+                        assert!(
+                            line.width() <= width,
+                            "Picking line '{line}' display width {} > {width} at {width}x{height}",
+                            line.width()
+                        );
+                    }
+                    assert!(
+                        lines.iter().any(|l| l.contains("Ctrl+C quit")),
+                        "Picking exit hint missing at {width}x{height}: {lines:?}"
+                    );
+                    if width >= 120 && height >= 12 {
+                        let expected = vec![format!(
+                            "Label: {}_  · type both letters · PgUp/PgDn scroll · Esc cancels · Ctrl+C quit",
+                            app.label_input
+                        )];
+                        assert_eq!(
+                            lines, expected,
+                            "Picking full long-form mismatch at {width}x{height}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn footer_rendering_in_terminal_fits_all_test_dimensions() {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "fist");
+        settle(&mut app);
+
+        let widths = [30, 45, 60, 80, 100, 120];
+        let heights = [10, 12, 24];
+
+        for &width in &widths {
+            for &height in &heights {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                let mut pointer = Pointer::default();
+                paint(&mut app, &mut terminal, &mut pointer);
+
+                let buffer = terminal.backend().buffer();
+                let footer_height = if height < 12 { 1 } else { 2 };
+                let start_y = height - footer_height;
+                let mut footer_text = String::new();
+                for y in start_y..height {
+                    for x in 0..width {
+                        footer_text.push_str(buffer[(x, y)].symbol());
+                    }
+                    footer_text.push('\n');
+                }
+                assert!(
+                    footer_text.contains("Ctrl+C quit"),
+                    "Terminal buffer missing exit hint at {width}x{height}:\n{footer_text}"
+                );
+            }
+        }
     }
 }
