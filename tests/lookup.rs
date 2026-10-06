@@ -115,14 +115,21 @@ fn lightweight_open_and_explicit_verification_are_separate() {
     let path = dir.path().join("pack");
     local_english_dict::verify_pack(&path).unwrap();
     let file = path.join("manifest.json");
-    let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
     assert_eq!(manifest["schema_version"], 2);
     manifest["files"]["entries.sqlite"] = "0".repeat(64).into();
     fs::write(file, manifest.to_string()).unwrap();
-    assert!(Dictionary::open(&path).is_ok(), "normal open must not scan payload checksums");
+    assert!(
+        Dictionary::open(&path).is_ok(),
+        "normal open must not scan payload checksums"
+    );
     assert!(local_english_dict::verify_pack(&path).is_err());
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_wordglide"))
-        .args(["--verify-data", "--data"]).arg(&path).output().unwrap();
+        .args(["--verify-data", "--data"])
+        .arg(&path)
+        .output()
+        .unwrap();
     assert!(!output.status.success());
     assert!(!output.stdout.windows(8).any(|w| w == b"\x1b[?1049h"));
 }
@@ -132,11 +139,19 @@ fn verification_cli_exits_without_a_terminal_and_schema_is_checked() {
     let (dir, _dict) = pack();
     let path = dir.path().join("pack");
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_wordglide"))
-        .args(["--verify-data", "--data"]).arg(&path).output().unwrap();
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        .args(["--verify-data", "--data"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(String::from_utf8_lossy(&output.stdout).contains("verified"));
     let conn = rusqlite::Connection::open(path.join("entries.sqlite")).unwrap();
-    conn.execute_batch("ALTER TABLE entries RENAME TO wrong_table").unwrap();
+    conn.execute_batch("ALTER TABLE entries RENAME TO wrong_table")
+        .unwrap();
     assert!(Dictionary::open(&path).is_err());
 }
 
@@ -151,5 +166,59 @@ fn invalid_record_offsets_return_errors_instead_of_panicking() {
     fs::write(file, bytes).unwrap();
     let mut dict = Dictionary::open(&path).unwrap();
     assert!(dict.search("better").is_err());
+    assert!(local_english_dict::verify_pack(&path).is_err());
+}
+
+#[test]
+fn full_verification_checks_tree_and_strings_even_with_updated_hashes() {
+    use sha2::{Digest, Sha256};
+    for damage in ["string", "tree"] {
+        let (dir, _dict) = pack();
+        let path = dir.path().join("pack");
+        let file = path.join("lexicon.bin");
+        let mut bytes = fs::read(&file).unwrap();
+        if damage == "string" {
+            bytes[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
+        } else {
+            let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
+            let root = 32 + 20 * count + 4;
+            bytes[root..root + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        }
+        fs::write(file, &bytes).unwrap();
+        let file = path.join("manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        manifest["files"]["lexicon.bin"] = format!("{:x}", Sha256::digest(&bytes)).into();
+        fs::write(file, manifest.to_string()).unwrap();
+        assert!(Dictionary::open(&path).is_ok());
+        assert!(
+            local_english_dict::verify_pack(&path)
+                .unwrap_err()
+                .to_string()
+                .contains("Corrupt")
+        );
+    }
+}
+
+#[test]
+fn same_length_database_content_damage_is_detected_by_explicit_verification() {
+    let (dir, _dict) = pack();
+    let path = dir.path().join("pack");
+    let file = path.join("entries.sqlite");
+    let size = fs::metadata(&file).unwrap().len();
+    let conn = rusqlite::Connection::open(&file).unwrap();
+    let payload: String = conn
+        .query_row("SELECT payload FROM entries WHERE key='house'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    conn.execute(
+        "UPDATE entries SET payload=?1 WHERE key='house'",
+        [payload.replace("fixture", "altered")],
+    )
+    .unwrap();
+    drop(conn);
+    assert_eq!(fs::metadata(file).unwrap().len(), size);
+    assert!(Dictionary::open(&path).is_ok());
     assert!(local_english_dict::verify_pack(&path).is_err());
 }
