@@ -1,12 +1,12 @@
 use anyhow::{Result, ensure};
 use clap::Parser;
-use local_english_dict::{App, Dictionary, draw};
 use ratatui::{Terminal, backend::TestBackend};
 use std::{
     path::PathBuf,
     thread,
     time::{Duration, Instant},
 };
+use wordglide::{App, Dictionary, draw};
 
 #[derive(Parser)]
 #[command(about = "Measure full lookup+preview and asynchronous input-to-render latency")]

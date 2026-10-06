@@ -25,7 +25,7 @@ strike closed ball water produce improve run play work use used us hope
 
 def fetch(word):
     url = f"https://kaikki.org/dictionary/English/meaning/{quote(word[0])}/{quote(word[:2])}/{quote(word)}.html"
-    request = urllib.request.Request(url, headers={"User-Agent": "local-english-dict-source-sampler/0.1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "wordglide-source-sampler/0.1"})
     body = urllib.request.urlopen(request, timeout=60).read()
     page = body.decode()
     marker = page.find("[Show JSON for raw wiktextract")

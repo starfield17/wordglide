@@ -15,7 +15,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    local_english_dict::build_pack(&args.input, &args.source, &args.output)?;
+    wordglide::build_pack(&args.input, &args.source, &args.output)?;
     println!("Pack ready: {}", args.output.display());
     Ok(())
 }

@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use local_english_dict::{App, Dictionary, Focus, build_pack, draw};
 use ratatui::{Terminal, backend::TestBackend, style::Color};
 use std::{
     fs, thread,
     time::{Duration, Instant},
 };
+use wordglide::{App, Dictionary, Focus, build_pack, draw};
 
 fn app(words: &[(&str, i32)], query: &str) -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();

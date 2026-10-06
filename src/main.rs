@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use directories::ProjectDirs;
-use local_english_dict::{Dictionary, PackInfo, pack_info, run, verify_pack};
 use std::path::{Path, PathBuf};
+use wordglide::{Dictionary, PackInfo, pack_info, run, verify_pack};
 
 #[derive(Parser)]
 #[command(
@@ -32,8 +32,8 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
     let executable = std::env::current_exe().context("Cannot locate executable")?;
-    let user_data = ProjectDirs::from("org", "local-english-dict", "dict")
-        .map(|d| d.data_dir().join("english"));
+    let user_data =
+        ProjectDirs::from("org", "wordglide", "dict").map(|d| d.data_dir().join("english"));
     let env_data = std::env::var_os("WORDGLIDE_DATA")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);

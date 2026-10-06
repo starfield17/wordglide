@@ -1,11 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use local_english_dict::{App, Dictionary, Focus, build_pack, draw};
 use ratatui::{Terminal, backend::TestBackend};
 use std::{
     path::Path,
     thread,
     time::{Duration, Instant},
 };
+use wordglide::{App, Dictionary, Focus, build_pack, draw};
 
 fn dictionary() -> (tempfile::TempDir, Dictionary) {
     let dir = tempfile::tempdir().unwrap();

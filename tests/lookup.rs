@@ -1,5 +1,5 @@
-use local_english_dict::{Dictionary, MatchKind, build_pack};
 use std::fs;
+use wordglide::{Dictionary, MatchKind, build_pack};
 
 fn pack() -> (tempfile::TempDir, Dictionary) {
     let dir = tempfile::tempdir().unwrap();
@@ -113,7 +113,7 @@ fn checksum_damage_and_unreadable_canonical_entries_are_rejected() {
 fn lightweight_open_and_explicit_verification_are_separate() {
     let (dir, _dict) = pack();
     let path = dir.path().join("pack");
-    local_english_dict::verify_pack(&path).unwrap();
+    wordglide::verify_pack(&path).unwrap();
     let file = path.join("manifest.json");
     let mut manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
@@ -124,7 +124,7 @@ fn lightweight_open_and_explicit_verification_are_separate() {
         Dictionary::open(&path).is_ok(),
         "normal open must not scan payload checksums"
     );
-    assert!(local_english_dict::verify_pack(&path).is_err());
+    assert!(wordglide::verify_pack(&path).is_err());
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_wordglide"))
         .args(["--verify-data", "--data"])
         .arg(&path)
@@ -166,7 +166,7 @@ fn invalid_record_offsets_return_errors_instead_of_panicking() {
     fs::write(file, bytes).unwrap();
     let mut dict = Dictionary::open(&path).unwrap();
     assert!(dict.search("better").is_err());
-    assert!(local_english_dict::verify_pack(&path).is_err());
+    assert!(wordglide::verify_pack(&path).is_err());
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn full_verification_checks_tree_and_strings_even_with_updated_hashes() {
         fs::write(file, manifest.to_string()).unwrap();
         assert!(Dictionary::open(&path).is_ok());
         assert!(
-            local_english_dict::verify_pack(&path)
+            wordglide::verify_pack(&path)
                 .unwrap_err()
                 .to_string()
                 .contains("Corrupt")
@@ -220,7 +220,7 @@ fn same_length_database_content_damage_is_detected_by_explicit_verification() {
     drop(conn);
     assert_eq!(fs::metadata(file).unwrap().len(), size);
     assert!(Dictionary::open(&path).is_ok());
-    assert!(local_english_dict::verify_pack(&path).is_err());
+    assert!(wordglide::verify_pack(&path).is_err());
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn pack_info_reports_metadata_and_verify_counts_entries() {
     )
     .unwrap();
 
-    let info = local_english_dict::pack_info(&out).unwrap();
+    let info = wordglide::pack_info(&out).unwrap();
     assert_eq!(info.schema_version, 2);
     assert_eq!(info.candidate_count, 89);
     assert_eq!(info.snapshot, "2026-09-02-sampled-2026-10-06");
@@ -263,6 +263,6 @@ fn pack_info_reports_metadata_and_verify_counts_entries() {
     assert!(!info.licenses.is_empty());
     assert!(info.licenses.iter().any(|l| l.contains("CC BY-SA")));
 
-    assert_eq!(local_english_dict::verify_pack(&out).unwrap(), 89);
-    assert!(local_english_dict::pack_info(&dir.path().join("missing")).is_err());
+    assert_eq!(wordglide::verify_pack(&out).unwrap(), 89);
+    assert!(wordglide::pack_info(&dir.path().join("missing")).is_err());
 }

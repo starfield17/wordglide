@@ -2,7 +2,7 @@
 //!
 //! Internal indexes are deliberately not a public API:
 //! ```compile_fail
-//! use local_english_dict::index::Index;
+//! use wordglide::index::Index;
 //! ```
 #![forbid(unsafe_code)]
 
