@@ -86,7 +86,7 @@ def main():
     p.add_argument("--output", default="dist", type=Path, help="New output directory")
     p.add_argument("--binaries", default="target/release", type=Path)
     args = p.parse_args()
-    if not re.fullmatch(r"[a-z0-9-]+", args.target) or not re.fullmatch(
+    if not re.fullmatch(r"[a-z0-9_-]+", args.target) or not re.fullmatch(
             r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", args.version):
         raise ValueError("Invalid target or version")
     if not (args.binaries / "wordglide").is_file():

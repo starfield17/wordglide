@@ -36,27 +36,29 @@ source preview text, exit with Ctrl+C, and check terminal restoration. Their
 peak process resident memory includes startup; they do not exercise a completely
 filled definition cache. That cache has a separate 32 MiB budget.
 
-The configured CI matrix covers macOS and Linux. Remote CI execution and public
-release hosting remain outside this verification run.
+The CI matrix checks macOS and Linux. Release validation additionally builds
+Intel/ARM64 macOS and x86_64/ARM64 Linux packages, checks runtime dependencies,
+and exercises full-data bundles from an unrelated working directory without
+a dictionary path argument.
 
 ## Results
 
 | Lookup | Query | First cache read (ms) | Warm P50 (ms) | Warm P95 (ms) |
 | --- | --- | ---: | ---: | ---: |
-| Single letter | `h` | 0.137 | 0.002 | 0.003 |
-| Prefix | `ho` | 0.076 | 0.002 | 0.002 |
-| Exact | `house` | 0.077 | 0.001 | 0.002 |
-| Fuzzy | `hosue` | 0.238 | 0.076 | 0.083 |
-| Word form | `went` | 0.151 | 0.002 | 0.002 |
-| Phrase | `take off` | 0.253 | 0.086 | 0.095 |
+| Single letter | `h` | 0.098 | 0.002 | 0.003 |
+| Prefix | `ho` | 0.072 | 0.002 | 0.002 |
+| Exact | `house` | 0.081 | 0.001 | 0.002 |
+| Fuzzy | `hosue` | 0.246 | 0.075 | 0.082 |
+| Word form | `went` | 0.128 | 0.002 | 0.002 |
+| Phrase | `take off` | 0.275 | 0.089 | 0.099 |
 
-- Asynchronous input-to-render P95: **4.367 ms**; target: ≤50 ms.
-- Peak resident memory: **163.6 MiB** (`fist`), **164.1 MiB** (`went`);
+- Asynchronous input-to-render P95: **4.091 ms**; target: ≤50 ms.
+- Peak resident memory: **163.7 MiB** (`fist`), **164.1 MiB** (`went`);
   target: ≤512 MiB.
 - Both real-PTY checks passed: automatic preview without Enter, successful
   exit, restored terminal attributes, and restored alternate screen.
-- Formatting, Clippy with warnings denied, 11 Rust tests, one compile-fail
-  boundary doc test, and seven Python pipeline tests passed.
+- Formatting, Clippy with warnings denied, 18 Rust tests, one compile-fail
+  boundary doc test, and ten Python pipeline tests passed.
 
 Full-pack checks confirm `went → go`, `better → good / well`, and
 `chose → choose`. `house` and `fist` do not gain unrelated inverse aliases;
