@@ -26,6 +26,7 @@ def main():
     command = [os.path.abspath(args.binary)]
     if args.data:
         command.extend(["--data", args.data])
+    started = time.monotonic()
     process = subprocess.Popen(command,
                                stdin=slave, stdout=slave, stderr=slave)
     output = bytearray()
@@ -42,6 +43,7 @@ def main():
             drain(0.05)
             if process.poll() is not None or time.monotonic() > deadline:
                 raise AssertionError("Dictionary did not enter its terminal UI")
+        print(f"Startup to terminal UI: {(time.monotonic() - started) * 1000:.3f} ms")
         os.write(master, args.query.encode("utf-8"))
         deadline = time.monotonic() + 5
         needle = args.needle.encode("utf-8")

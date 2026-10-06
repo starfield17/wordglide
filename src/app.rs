@@ -339,11 +339,17 @@ impl App {
                 return;
             }
             let query = normalize(&self.input);
-            if let Some(common) = self.lexicon.common_prefix(&query)
-                && common.len() > query.len()
-            {
-                self.input = common;
-                self.cursor = self.input.len();
+            match self.lexicon.common_prefix(&query) {
+                Ok(Some(common)) if common.len() > query.len() => {
+                    self.input = common;
+                    self.cursor = self.input.len();
+                }
+                Err(error) => {
+                    self.error = Some(format!("{error:#}"));
+                    self.completion = None;
+                    return;
+                }
+                _ => {}
             }
             if !reverse {
                 return;

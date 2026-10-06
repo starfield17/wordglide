@@ -1,5 +1,5 @@
 use crate::model::{Entry, Manifest, RANKING, SCHEMA_VERSION};
-use crate::{Candidate, MatchKind, normalize};
+use crate::{Candidate, MatchKind, index::Index, normalize};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
@@ -36,7 +36,7 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
     ensure!(source.is_object(), "Provenance must be a JSON object");
     fs::create_dir_all(output)?;
     let mut conn = Connection::open(output.join("entries.sqlite"))?;
-    conn.execute_batch("CREATE TABLE entries(key TEXT PRIMARY KEY, payload TEXT NOT NULL) WITHOUT ROWID; PRAGMA user_version=1;")?;
+    conn.execute_batch("CREATE TABLE entries(key TEXT PRIMARY KEY, payload TEXT NOT NULL) WITHOUT ROWID; PRAGMA user_version=2;")?;
     let tx = conn.transaction()?;
     let mut count = 0;
     {
@@ -91,10 +91,15 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
         });
     }
     builder.finish()?;
-    serde_json::to_writer(File::create(output.join("candidates.json"))?, &words)?;
+    let data = Index::encode(&words)?;
+    fs::write(output.join("lexicon.bin"), &data)?;
+    Index::open(data, fs::read(output.join("words.fst"))?)?.verify()?;
+    drop(words);
     let mut files = BTreeMap::new();
-    for name in ["entries.sqlite", "words.fst", "candidates.json"] {
+    let mut sizes = BTreeMap::new();
+    for name in ["entries.sqlite", "words.fst", "lexicon.bin"] {
         files.insert(name.to_string(), checksum(&output.join(name))?);
+        sizes.insert(name.to_string(), fs::metadata(output.join(name))?.len());
     }
     let manifest = Manifest {
         schema_version: SCHEMA_VERSION,
@@ -102,6 +107,7 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
         ranking: RANKING.into(),
         source,
         files,
+        sizes,
     };
     let mut file = File::create(output.join("manifest.json"))?;
     file.write_all(&serde_json::to_vec_pretty(&manifest)?)?;

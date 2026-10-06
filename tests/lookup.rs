@@ -232,11 +232,11 @@ fn damaged_fst_nodes_fail_open_without_a_query_panic() {
         let mut bytes = original.clone();
         let footer = bytes.len() - 12;
         if damage == "node" {
-            let root = u64::from_le_bytes(bytes[footer..footer+8].try_into().unwrap()) as usize;
+            let root = u64::from_le_bytes(bytes[footer..footer + 8].try_into().unwrap()) as usize;
             bytes[root] = 63;
-            bytes[root-1] = 255;
+            bytes[root - 1] = 255;
         } else {
-            bytes[footer..footer+8].copy_from_slice(&u64::MAX.to_le_bytes());
+            bytes[footer..footer + 8].copy_from_slice(&u64::MAX.to_le_bytes());
         }
         fs::write(&file, bytes).unwrap();
         assert!(Dictionary::open(&dir.path().join("pack")).is_err());

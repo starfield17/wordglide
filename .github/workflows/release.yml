@@ -26,12 +26,12 @@ jobs:
       GH_REPO: ${{ github.repository }}
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: ${{ matrix.target }}
           components: rustfmt, clippy
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
       - name: Prepare portable compiler settings
@@ -94,6 +94,7 @@ jobs:
         run: |
           mkdir -p artifacts/unpacked
           tar -xzf dist/release/*-with-data.tar.gz -C artifacts/unpacked
+          artifacts/unpacked/wordglide/wordglide --verify-data
           dict_repo_root="$PWD"
           cd "$(mktemp -d)"
           python3 "$dict_repo_root/scripts/terminal_smoke.py" --binary "$dict_repo_root/artifacts/unpacked/wordglide/wordglide"
@@ -114,12 +115,13 @@ jobs:
           assert all(line.strip().startswith(('/usr/lib/', '/System/')) for line in dependencies), 'Non-system runtime dependency'
           PY
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.target }}
           path: dist/release/*
           if-no-files-found: error
           retention-days: 7
+          compression-level: 0
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -131,8 +133,8 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
         with:
           pattern: release-*
           path: artifacts/assets
@@ -166,6 +168,10 @@ jobs:
               'Extract the dictionary into the program directory so `english-pack/` sits beside the executable.\n\n'
               'Supports macOS 11+ (Intel/ARM64) and Linux (x86_64/ARM64, static musl executables). '
               'Verify downloads with `SHA256SUMS.txt`.\n\n'
+              'Uses the compact schema 2 dictionary pack with prebuilt ranking indexes. '
+              'Normal startup performs lightweight checks; run `wordglide --verify-data` '
+              'for full checksum, index, and database verification without opening the TUI. '
+              'Old dictionary packs must be replaced.\n\n'
               'Type for immediate definition previews. Tab completes a common prefix and cycles candidates; '
               'Shift+Tab reverses, Right/Ctrl+F accepts gray suggestions, Enter enters reading, and Esc returns.\n\n'
               'Dictionary snapshot: English Wiktionary via Kaikki/Wiktextract, 2026-09-02, '

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use directories::ProjectDirs;
-use local_english_dict::{Dictionary, run};
+use local_english_dict::{Dictionary, run, verify_pack};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -15,6 +15,9 @@ struct Args {
     /// Directory containing manifest.json and the prepared data files.
     #[arg(long)]
     data: Option<PathBuf>,
+    /// Verify all data checksums, indexes, and database integrity, then exit.
+    #[arg(long, conflicts_with = "query")]
+    verify_data: bool,
 }
 
 fn main() -> Result<()> {
@@ -23,6 +26,11 @@ fn main() -> Result<()> {
     let user_data = ProjectDirs::from("org", "local-english-dict", "dict")
         .map(|d| d.data_dir().join("english"));
     let path = resolve_data(args.data, &executable, user_data)?;
+    if args.verify_data {
+        verify_pack(&path)?;
+        println!("Data pack verified");
+        return Ok(());
+    }
     let dict = Dictionary::open(&path)?;
     run(dict, args.query.as_deref().unwrap_or(""))
 }

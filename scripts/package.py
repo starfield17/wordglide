@@ -11,7 +11,7 @@ import shutil
 import tarfile
 import tomllib
 
-DATA_FILES = ("entries.sqlite", "words.fst", "candidates.json")
+DATA_FILES = ("entries.sqlite", "words.fst", "lexicon.bin")
 DATA_MEMBERS = {"english-pack/" + name for name in
                 ("manifest.json", *DATA_FILES, "THIRD_PARTY.md")}
 DOCS = ("README.md", "LICENSE", "THIRD_PARTY.md", "PERFORMANCE.md")
@@ -47,6 +47,7 @@ def validate_data_archive(path):
     manifest = None
     seen = set()
     hashes = {}
+    sizes = {}
     with tarfile.open(path, "r|gz") as tar:
         for member in tar:
             if not member.isfile() or member.name not in DATA_MEMBERS or member.name in seen:
@@ -58,6 +59,7 @@ def validate_data_archive(path):
             seen.add(member.name)
             source = tar.extractfile(member)
             name = Path(member.name).name
+            sizes[name] = member.size
             if name == "manifest.json":
                 manifest = json.load(source)
             else:
@@ -65,13 +67,15 @@ def validate_data_archive(path):
                 for block in iter(lambda: source.read(1024 * 1024), b""):
                     h.update(block)
                 hashes[name] = h.hexdigest()
-    if seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 1:
+    if seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 2:
         raise ValueError("Incomplete data archive or unsupported schema")
     if manifest.get("candidate_count", 0) <= 0:
         raise ValueError("Empty data archive")
     for name in DATA_FILES:
         if hashes[name] != manifest.get("files", {}).get(name):
             raise ValueError(f"Corrupt data archive: {name}")
+        if sizes[name] != manifest.get("sizes", {}).get(name):
+            raise ValueError(f"Corrupt data archive length: {name}")
     return manifest
 
 
@@ -93,11 +97,13 @@ def main():
         raise ValueError("Build the Wordglide release executable first")
     if args.pack:
         manifest = json.loads((args.pack / "manifest.json").read_text())
-        if manifest.get("schema_version") != 1:
+        if manifest.get("schema_version") != 2:
             raise ValueError("Unsupported pack schema")
         for name in DATA_FILES:
             if checksum(args.pack / name) != manifest["files"][name]:
                 raise ValueError(f"Corrupt file: {name}")
+            if (args.pack / name).stat().st_size != manifest.get("sizes", {}).get(name):
+                raise ValueError(f"Corrupt file length: {name}")
     else:
         validate_data_archive(args.data_archive)
     args.output.mkdir(parents=True, exist_ok=False)

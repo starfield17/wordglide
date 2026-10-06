@@ -25,7 +25,12 @@ fn percentile(values: &mut [f64], p: usize) -> f64 {
 fn main() -> Result<()> {
     let args = Args::parse();
     ensure!(args.iterations > 0, "iterations must be positive");
+    let opened = Instant::now();
     let dictionary = Dictionary::open(&args.data)?;
+    println!(
+        "Dictionary open: {:.3}ms (OS caches not flushed)",
+        opened.elapsed().as_secs_f64() * 1000.
+    );
     println!("Candidates: {}", dictionary.candidate_count());
     drop(dictionary);
     for (kind, query) in [

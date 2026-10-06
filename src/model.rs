@@ -80,8 +80,9 @@ pub(crate) struct Manifest {
     pub ranking: String,
     pub source: serde_json::Value,
     pub files: std::collections::BTreeMap<String, String>,
+    pub sizes: std::collections::BTreeMap<String, u64>,
 }
 
-pub(crate) const SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 2;
 pub(crate) const RANKING: &str =
     "100*zipf-2*chars-100*extra_words;exact>inflection>prefix>fuzzy;key_tie";

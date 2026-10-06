@@ -67,8 +67,27 @@ You can start with a query: `wordglide "take off" --data data/sample-pack`.
 beside the actual executable, including when launched through a symlink or from
 another working directory. It then checks the existing platform user-data
 directory under `dict/english`. An explicitly selected or adjacent damaged pack
-fails validation instead of silently switching dictionaries. Copy an entire pack
+fails structural validation instead of silently switching dictionaries. Copy an entire pack
 to either location, or keep using `--data`. The application never downloads data.
+
+## Verify a data pack
+
+Normal startup checks schema, file lengths, compact-index layout, and database
+structure. It does not hash the dictionary or run a full SQLite integrity scan.
+The small, already-loaded FST buffer receives its built-in CRC check to reject
+accidentally damaged nodes before traversal.
+
+For complete verification, run:
+
+```sh
+wordglide --verify-data --data PACK_DIRECTORY
+```
+
+This checks all SHA-256 receipts, vocabulary/index agreement, prebuilt ranking,
+and SQLite integrity, then exits without opening the TUI. Omit `--data` to verify
+the automatically selected pack. Successful verification exits with status 0;
+errors exit with a nonzero status. Schema 2 packs are required; old packs must be
+replaced with a newly built or downloaded pack.
 
 ## Keys
 
@@ -118,8 +137,12 @@ by normalized key. Wordfreq is queried only while building data. Runtime scores
 never depend on your lookups. Short phrases receive a fixed penalty because
 their wordfreq estimate is not a measured phrase count.
 
-The sorted vocabulary and range-max tree return prefix top-k without sorting all
-prefix matches. An FST handles fuzzy matching. A read-only SQLite database stores
+The compact binary vocabulary and prebuilt range-max tree return prefix top-k
+without sorting all prefix matches. The builder writes `lexicon.bin`: a versioned
+32-byte header, 20-byte candidate records, a little-endian u32 ranking tree, and
+shared UTF-8 strings. Runtime loads this buffer and the FST once, without parsing
+candidate JSON, creating millions of string objects, or rebuilding the tree.
+Only returned candidates allocate strings. An FST handles exact and fuzzy matching. A read-only SQLite database stores
 structured words, parts of speech, pronunciation, senses, source examples, and
 word forms. A bounded cache holds visited entries. A worker coalesces pending
 queries; response IDs stop obsolete previews from overwriting newer input.
@@ -178,7 +201,8 @@ python3 scripts/package.py --pack data/english-pack --target RUST_TARGET --outpu
 ```
 
 Benchmarks distinguish first application-cache reads, warm lookup/preview time,
-and asynchronous input-to-TestBackend render time at 120×40. OS file caches are
+and asynchronous input-to-TestBackend render time at 120×40. They also report
+dictionary-open time; the real PTY check reports startup to terminal UI. OS file caches are
 not flushed. The renderer measurement excludes terminal emulator display latency.
 Full-pack target: P95 input-to-render ≤50 ms and resident memory about ≤512 MiB;
 startup time is not a target. Record terminal size, data snapshot, and measurement

@@ -18,5 +18,5 @@ pub use app::{App, Focus};
 pub use build::build_pack;
 pub use model::{Candidate, Entry, Example, Group, MatchKind, Preview, Sense};
 pub use normalize::normalize;
-pub use store::Dictionary;
+pub use store::{Dictionary, verify_pack};
 pub use ui::{draw, run};
