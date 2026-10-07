@@ -75,7 +75,7 @@ fn command_filter_and_cancel_do_not_edit_the_lookup() {
     key(&mut app, KeyCode::F(3));
     app.paste("appearance");
     key(&mut app, KeyCode::Enter);
-    assert!(screen(&mut app, 120, 40).join("\n").contains("Appearance"));
+    assert!(screen(&mut app, 120, 40).join("\n").contains("Settings"));
     assert_eq!(app.input, "fist");
 }
 
