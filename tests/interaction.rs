@@ -299,3 +299,21 @@ fn settings_rows_edit_reading_preferences_without_changing_lookup_or_colors() {
         original
     );
 }
+
+#[test]
+fn deleting_a_separator_keeps_the_caret_outside_joined_graphemes() {
+    let (_dir, mut app) = app("");
+    for deletion in [KeyCode::Backspace, KeyCode::Delete] {
+        app.paste("🇦x🇧");
+        key(&mut app, KeyCode::Left);
+        if deletion == KeyCode::Delete {
+            key(&mut app, KeyCode::Left);
+        }
+        key(&mut app, deletion);
+        assert_eq!(app.input, "🇦🇧");
+        assert_eq!(app.cursor, app.input.len());
+        key(&mut app, KeyCode::Backspace);
+        assert!(app.input.is_empty());
+        assert_eq!(app.cursor, 0);
+    }
+}
