@@ -62,7 +62,10 @@ def main():
             session.wait(lambda: b"No matches" in session.output, "no-match feedback")
             session.send(b"\x1b")
             session.drain(0.1)
-            session.send(b"\x1b\x15")  # input focus, clear input
+            # Separate Esc from Ctrl+U: one combined byte burst encodes Alt+Ctrl+U.
+            session.send(b"\x1b")  # input focus
+            session.drain(0.1)
+            session.send(b"\x15")  # clear input
             paste(session, "fist")
             session.wait(lambda: b"clenched" in session.output, "new lookup")
             session.send(b"\r")
