@@ -53,6 +53,31 @@ fn stroke(app: &mut App, code: KeyCode) {
 }
 
 #[test]
+fn settings_download_is_a_modal_command_and_preserves_preferences_and_lookup() {
+    let (_dir, dictionary) = dictionary();
+    let mut app = App::new(dictionary, "fist");
+    settle(&mut app);
+    app.download_enabled = true;
+    let before = (app.input.clone(), app.cursor, app.selected, app.scroll, app.appearance(), app.reading_preferences());
+    let mut terminal = Terminal::new(TestBackend::new(30, 10)).unwrap();
+    let mut pointer = Pointer::default();
+    stroke(&mut app, KeyCode::F(2));
+    for _ in 0..6 { stroke(&mut app, KeyCode::Down); }
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(pointer.appearance_rows[6].height > 0);
+    let row = pointer.appearance_rows[6];
+    assert!(on_mouse(&mut app, &pointer, click(row.x, row.y)));
+    assert!(app.download_requested);
+    assert_eq!(app.view.overlay, Overlay::Download);
+    app.paste("ignored");
+    stroke(&mut app, KeyCode::F(1));
+    assert_eq!(app.view.overlay, Overlay::Download);
+    stroke(&mut app, KeyCode::Esc);
+    assert!(app.download_cancelled);
+    assert_eq!((app.input.clone(), app.cursor, app.selected, app.scroll, app.appearance(), app.reading_preferences()), before);
+}
+
+#[test]
 fn hard_line_breaks_and_source_controls() {
     let lines = wrap(
         vec![ReadingLine {
