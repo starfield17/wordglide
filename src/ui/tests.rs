@@ -257,6 +257,27 @@ fn click_input_returns_focus_without_navigation() {
 }
 
 #[test]
+fn input_click_uses_grapheme_columns_and_ghost_clicks_stop_at_real_text() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "");
+    app.paste("a e\u{301} 👩‍💻");
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(on_mouse(&mut app, &pointer, click(3, 1)));
+    assert_eq!(app.cursor, 2);
+    assert!(on_mouse(&mut app, &pointer, click(4, 1)));
+    assert_eq!(&app.input[..app.cursor], "a e\u{301}");
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.paste("ho");
+    settle(&mut app);
+    paint(&mut app, &mut terminal, &mut pointer);
+    app.cursor = 0;
+    assert!(on_mouse(&mut app, &pointer, click(8, 1)));
+    assert_eq!(app.cursor, app.input.len());
+}
+
+#[test]
 fn click_without_a_dictionary_word_and_mouse_motion_do_nothing() {
     let (_dir, dict) = dictionary();
     let mut app = App::new(dict, "fist");

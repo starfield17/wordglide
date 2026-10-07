@@ -226,3 +226,37 @@ fn confirmed_search_wraps_and_new_word_clears_it() {
     assert_eq!(app.scroll, 0);
     assert_eq!(app.input, "fist");
 }
+
+#[test]
+fn new_panels_preserve_theme_and_no_color_contracts() {
+    use ratatui::style::Color;
+    use wordglide::{Appearance, ThemePreset};
+    let (_dir, mut app) = app("set");
+    key(&mut app, KeyCode::Enter);
+    for theme in ThemePreset::ALL {
+        for color in [false, true] {
+            app.set_appearance(Appearance {
+                color_theme: theme,
+                truecolor: false,
+                ..Default::default()
+            });
+            app.set_color(color);
+            for (width, height) in [(80, 24), (120, 40), (180, 48), (30, 10)] {
+                for panel in [KeyCode::F(3), KeyCode::Char('o'), KeyCode::Char('/')] {
+                    key(&mut app, panel);
+                    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                    terminal.draw(|f| draw(f, &mut app)).unwrap();
+                    for cell in terminal.backend().buffer().content() {
+                        assert!(!matches!(cell.fg, Color::Rgb(..)));
+                        assert!(!matches!(cell.bg, Color::Rgb(..)));
+                        if !color {
+                            assert_eq!(cell.fg, Color::Reset);
+                            assert_eq!(cell.bg, Color::Reset);
+                        }
+                    }
+                    key(&mut app, KeyCode::Esc);
+                }
+            }
+        }
+    }
+}
