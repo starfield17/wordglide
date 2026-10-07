@@ -28,7 +28,6 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `data-release.json`: pinned dictionary Release asset and checksum; CI input only.
 - `tests/`: public API and real pack integration scenarios.
 - `SPEC.md`: accepted behaviors and performance targets.
-- `tuidict/`: separate reference project, excluded from our checks and build.
 
 Runtime/build separation is explicit: `wordglide` opens prepared packs; only
 `dict-build` and `scripts/prepare.py` write dictionary data. Review dependency

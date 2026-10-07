@@ -125,9 +125,8 @@ belongs to the terminal session, never the dictionary worker or data pack.
 - N3 No audio, images, cloud services, plugins, or multi-dictionary management.
 - N4 No rewriting definitions or inventing examples to fill source gaps.
 - N5 Prefix top-k must not enumerate and sort all prefix matches.
-- N6 Do not modify or fork the reference implementation in `tuidict/`.
-- N7 When an out-of-scope issue appears, record it below; do not implement it.
-- N8 No runtime candidate JSON parsing or rebuilding the ranking tree.
+- N6 When an out-of-scope issue appears, record it below; do not implement it.
+- N7 No runtime candidate JSON parsing or rebuilding the ranking tree.
 
 ## Frame
 Compile source data to a local pack. Runtime indexes contain compact binary candidate metadata and prebuilt ranking;

@@ -1,7 +1,5 @@
 # Data and dependencies
 
-Our implementation is independent; no code is copied from `tuidict/`.
-
 The built-in orange, gruvbox_light, gruvbox_dark_v2, and whiteout palettes are
 inspired by the [btop theme collection](https://github.com/aristocratos/btop/tree/main/themes).
 The orange palette credits neocerambyx; gruvbox_light credits kk9uk;

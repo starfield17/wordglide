@@ -6,8 +6,6 @@ A small offline English–English dictionary for reading in a terminal. Type a
 word or phrase and immediately see frequency-ranked candidates and the first
 candidate's definition. Enter is never needed to search.
 
-The implementation is independent. An optional `tuidict/` reference checkout
-is excluded from this project's build and version control.
 Definitions and examples come from Wiktionary, not an LLM. Open data has uneven
 example coverage and is not equivalent to Oxford's learner-oriented editing.
 
@@ -405,3 +403,10 @@ Update packs by unpacking to a new directory and restarting with `--data`, or by
 replacing the adjacent pack while the application is stopped.
 
 Code: MIT. Data: its original licenses and attribution; see [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## Acknowledgements
+
+Thanks to [404Simon/tuidict](https://github.com/404Simon/tuidict) for providing
+an early reference for Wordglide's first version, and to its author for sharing
+the project. Wordglide is independently implemented; no tuidict code is
+incorporated.
