@@ -4,9 +4,43 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
+import unicodedata
 
 from terminal_appearance_smoke import Session
+
+
+def screen_text(output, width=120, height=40):
+    """Reconstruct the absolute-positioned ANSI frames emitted by this TUI."""
+    rows = [[" "] * width for _ in range(height)]
+    x = y = 0
+    for token in re.findall(r"\x1b\[[0-?]*[ -/]*[@-~]|[^\x1b]",
+                            output.decode("utf-8", errors="replace")):
+        if token.startswith("\x1b["):
+            if token[-1] in "Hf":
+                coordinates = token[2:-1].split(";")
+                y = int(coordinates[0] or "1") - 1
+                x = int(coordinates[1] or "1") - 1 if len(coordinates) > 1 else 0
+            elif token == "\x1b[2J":
+                rows = [[" "] * width for _ in range(height)]
+            continue
+        if token == "\r":
+            x = 0
+        elif token == "\n":
+            y += 1
+        elif not unicodedata.category(token).startswith("C"):
+            columns = 0 if unicodedata.combining(token) else (
+                2 if unicodedata.east_asian_width(token) in "WF" else 1)
+            if 0 <= y < height:
+                if columns == 0 and 0 < x <= width:
+                    rows[y][x - 1] += token
+                elif 0 <= x < width:
+                    rows[y][x] = token
+                    if columns == 2 and x + 1 < width:
+                        rows[y][x + 1] = ""
+            x += columns
+    return "\n".join("".join(row) for row in rows)
 
 
 def paste(session, text):
@@ -100,9 +134,10 @@ def main():
         session = launch("fist")
         try:
             session.send(b"\x1bOQ")  # F2
-            session.wait(lambda: b"Reading layout: focus" in session.output
-                         and b"Examples / references: full" in session.output
-                         and b"Pronunciation (IPA): full" in session.output, "restored preferences")
+            session.wait(lambda: b"Appearance" in session.output, "restored settings panel")
+            session.wait(lambda: all(label in screen_text(session.output) for label in (
+                "Reading layout: focus", "Examples / references: full",
+                "Pronunciation (IPA): full")), "restored preferences")
         finally:
             session.close()
         assert next(root.rglob("config.json")).read_bytes() == saved, "Restart rewrote preferences"

@@ -10,7 +10,7 @@ use ratatui::{
 pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Pointer) {
     let screen = frame.area();
     let width = screen.width.min(68);
-    let height = screen.height.min(12);
+    let height = screen.height.min(16);
     let area = Rect::new(
         screen.x + (screen.width - width) / 2,
         screen.y + (screen.height - height) / 2,
@@ -22,7 +22,7 @@ pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Poin
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(if app.theme.color {
-            " Appearance · Esc closes "
+            " Appearance & Reading · Esc closes "
         } else {
             " Appearance · no color "
         })
@@ -49,9 +49,39 @@ pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Poin
                 "off (256 colors)"
             }
         ),
+        format!(
+            "Reading layout: {}",
+            if app.view.reading_layout == crate::ReadingLayout::Split {
+                "split"
+            } else {
+                "focus"
+            }
+        ),
+        format!(
+            "Examples / references: {}",
+            if app.view.expand_examples {
+                "full"
+            } else {
+                "compact"
+            }
+        ),
+        format!(
+            "Pronunciation (IPA): {}",
+            if app.view.expand_ipa { "full" } else { "short" }
+        ),
     ];
-    for (index, text) in rows.into_iter().enumerate() {
-        let row = Rect::new(inner.x, inner.y + index as u16, inner.width, 1);
+    let list_height = inner.height.saturating_sub(3).clamp(1, 6);
+    let offset = app
+        .view
+        .appearance_row
+        .saturating_sub(list_height.saturating_sub(1) as usize);
+    for (index, text) in rows
+        .into_iter()
+        .enumerate()
+        .skip(offset)
+        .take(list_height as usize)
+    {
+        let row = Rect::new(inner.x, inner.y + (index - offset) as u16, inner.width, 1);
         pointer.appearance_rows[index] = Region::from(row);
         let style = if index == app.view.appearance_row {
             app.theme.selected()
@@ -78,9 +108,9 @@ pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Poin
     };
     let details = Rect::new(
         inner.x,
-        inner.y + 4,
+        inner.y + list_height,
         inner.width,
-        inner.height.saturating_sub(6),
+        inner.height.saturating_sub(list_height + 2),
     );
     frame.render_widget(
         Paragraph::new(vec![

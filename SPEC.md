@@ -27,8 +27,8 @@ selection and preview. Enter accepts candidate and focuses reading; Ctrl+L
 switches focus. Completion does not add lookup history or affect fixed ranking.
 Mouse: left click inside the definition pane focuses it; clicking a visible word
 there follows it when the pack contains it. The first click only focuses, so a
-single click never navigates. Clicks in the input box return focus without
-moving the cursor. A candidate click selects and previews that row without
+single click never navigates. Clicks in the input box return focus and position the cursor by grapheme
+display columns; prediction clicks clamp to the end of real input. A candidate click selects and previews that row without
 moving focus; clicking the highlighted candidate again accepts it and focuses
 the definition. The wheel scrolls the definition from any focus; motion and
 drag events are ignored and do not redraw. Only press and wheel reporting is
@@ -65,7 +65,7 @@ expand them. Wrapped lines hang under their sense marker. The pane title names
 the entry and shows scroll progress. Candidate panes size to their content, and
 a definition retained during loading is dimmed. An error is shown as a banner
 above the last good definition. Existing phrases included. Navigation history
-is session-only and does not affect ranking.
+persists as reading preferences and does not affect ranking.
 Long entries: Ctrl+J/K scrolls one line in reading focus; arrows continue selecting
 candidates. [/] jumps between source groups, and o opens the source-group outline.
 F4 switches split/focus reading, default split. Focus hides only the candidate
@@ -76,6 +76,16 @@ n/N repeats cyclically. Follow hints supersede highlighting. New words clear fin
 Layout/display changes and history restoration use source group/sense/text anchors;
 folded examples return to their parent sense. Ctrl+R selects existing session-only
 back/forward snapshots without logging typed queries or changing ranking.
+Reading preferences: config.json also stores reading_layout (split/focus),
+expand_examples, and expand_ipa, defaulting to split/false/false. F2 includes
+these controls; e/p/F4 and menu changes auto-save through the same atomic,
+field-specific retry mechanism. Queries, positions, find text, and navigation
+snapshots never enter configuration. Public ReadingPreferences and ReadingLayout
+are additive; existing run, RunOptions, and appearance APIs remain compatible.
+Input cursor movement, deletion, and horizontal rendering respect grapheme
+boundaries. Idle terminal polling uses a longer interruptible timeout; pending
+lookup results keep the short polling interval. Cached reading rows are independent
+of terminal colors and only current-document text is retained.
 Action discovery: Ctrl+G/F3 opens a searchable fixed local-action menu. Disabled
 operations show a reason. Enter/click executes; Esc preserves the lookup. Only
 one overlay owns input, paste, and mouse at a time; queued completion waits for

@@ -20,6 +20,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
 };
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 // The moved unit tests refer to module items by their former bare names.
@@ -67,7 +68,18 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
     let before = &app.input[..app.cursor];
     let mut start = 0;
     while before[start..].width() > available.saturating_sub(1) {
-        start += before[start..].chars().next().map_or(0, char::len_utf8);
+        start += before[start..].graphemes(true).next().map_or(0, str::len);
+    }
+    let mut column = rows[0].x + 1;
+    pointer.input_positions.push((column, start));
+    for (byte, grapheme) in app.input[start..].grapheme_indices(true) {
+        column = column.saturating_add(grapheme.width() as u16);
+        if column >= rows[0].right().saturating_sub(1) {
+            break;
+        }
+        pointer
+            .input_positions
+            .push((column, start + byte + grapheme.len()));
     }
     frame.render_widget(
         Paragraph::new(Line::from(vec![

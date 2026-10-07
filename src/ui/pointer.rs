@@ -57,6 +57,7 @@ struct HitRow {
 #[derive(Default)]
 pub(super) struct Pointer {
     pub(super) input: Region,
+    pub(super) input_positions: Vec<(u16, usize)>,
     pub(super) panel: Region,
     pub(super) navigation_rows: Vec<(Region, usize)>,
     pub(super) command_rows: Vec<(Region, Action, usize)>,
@@ -66,12 +67,13 @@ pub(super) struct Pointer {
     pub(super) candidates_offset: usize,
     pub(super) candidates_len: usize,
     rows: Vec<HitRow>,
-    pub(super) appearance_rows: [Region; 3],
+    pub(super) appearance_rows: [Region; 6],
 }
 
 impl Pointer {
     pub(super) fn reset(&mut self) {
         self.input = Region::default();
+        self.input_positions.clear();
         self.panel = Region::default();
         self.command_rows.clear();
         self.navigation_rows.clear();
@@ -81,7 +83,7 @@ impl Pointer {
         self.candidates_offset = 0;
         self.candidates_len = 0;
         self.rows.clear();
-        self.appearance_rows = [Region::default(); 3];
+        self.appearance_rows = [Region::default(); 6];
     }
 
     pub(super) fn record_rows(&mut self, inner: Rect, visible: &[&ReadingLine]) {
@@ -134,9 +136,9 @@ impl Pointer {
 pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
     if app.view.show_appearance() {
         match mouse.kind {
-            MouseEventKind::ScrollUp => app.view.appearance_row = (app.view.appearance_row + 2) % 3,
+            MouseEventKind::ScrollUp => app.view.appearance_row = (app.view.appearance_row + 5) % 6,
             MouseEventKind::ScrollDown => {
-                app.view.appearance_row = (app.view.appearance_row + 1) % 3
+                app.view.appearance_row = (app.view.appearance_row + 1) % 6
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(index) = pointer
@@ -265,11 +267,18 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
         let index = pointer.candidates_offset + row;
         return index < pointer.candidates_len && app.click_candidate(index);
     }
-    if pointer.input.contains(mouse.column, mouse.row) && app.focus != Focus::Input {
+    if pointer.input.contains(mouse.column, mouse.row) {
+        let position = pointer
+            .input_positions
+            .iter()
+            .min_by_key(|(column, _)| column.abs_diff(mouse.column))
+            .map_or(app.cursor, |(_, byte)| *byte);
+        let changed = app.focus != Focus::Input || app.cursor != position || app.picking;
+        app.cursor = position;
         app.focus = Focus::Input;
         app.picking = false;
         app.label_input.clear();
-        return true;
+        return changed;
     }
     false
 }

@@ -86,5 +86,59 @@ fn main() -> Result<()> {
         "Async input-to-TestBackend-render 120x40 P95={:.3}ms (does not include terminal emulator display)",
         percentile(&mut values, 95)
     );
+    for query in ["set", "take", "run"] {
+        let mut app = App::new(Dictionary::open(&args.data)?, query);
+        let deadline = Instant::now();
+        while app.loading {
+            app.poll();
+            ensure!(
+                deadline.elapsed() < Duration::from_secs(10),
+                "Worker timeout"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        if !app.preview.as_ref().is_some_and(|p| p.entry.key == query) {
+            continue;
+        }
+        let key = |code, modifiers| crossterm::event::KeyEvent::new(code, modifiers);
+        use crossterm::event::{KeyCode, KeyModifiers};
+        app.handle_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        let first = Instant::now();
+        terminal.draw(|f| draw(f, &mut app))?;
+        let first_draw = first.elapsed().as_secs_f64() * 1000.;
+        let mut scroll = Vec::new();
+        for _ in 0..args.iterations {
+            let start = Instant::now();
+            app.handle_key(key(KeyCode::Char('j'), KeyModifiers::CONTROL));
+            terminal.draw(|f| draw(f, &mut app))?;
+            scroll.push(start.elapsed().as_secs_f64() * 1000.);
+        }
+        let first = Instant::now();
+        app.handle_key(key(KeyCode::Char('/'), KeyModifiers::NONE));
+        app.paste("the");
+        terminal.draw(|f| draw(f, &mut app))?;
+        let find_first = first.elapsed().as_secs_f64() * 1000.;
+        app.handle_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        let mut find = Vec::new();
+        let mut reflow = Vec::new();
+        for i in 0..args.iterations {
+            let start = Instant::now();
+            app.handle_key(key(KeyCode::Char('n'), KeyModifiers::NONE));
+            terminal.draw(|f| draw(f, &mut app))?;
+            find.push(start.elapsed().as_secs_f64() * 1000.);
+            let mut resized =
+                Terminal::new(TestBackend::new(if i % 2 == 0 { 80 } else { 120 }, 40))?;
+            let start = Instant::now();
+            app.handle_key(key(KeyCode::Char('e'), KeyModifiers::NONE));
+            resized.draw(|f| draw(f, &mut app))?;
+            reflow.push(start.elapsed().as_secs_f64() * 1000.);
+        }
+        println!(
+            "Reading {query:5} first-draw={first_draw:.3}ms find-first={find_first:.3}ms scroll P95={:.3}ms next-match P95={:.3}ms resize+examples P95={:.3}ms",
+            percentile(&mut scroll, 95),
+            percentile(&mut find, 95),
+            percentile(&mut reflow, 95)
+        );
+    }
     Ok(())
 }

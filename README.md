@@ -116,10 +116,11 @@ It does not save your queries or add a log of everything you type.
 
 ## Themes and appearance
 
-Press **F2** from either pane to open appearance settings. Use ↑/↓ to choose a
+Press **F2** from either pane to open appearance and reading settings. Use ↑/↓ to choose a
 setting and ←/→ or Space to change it; clicking a setting changes it, and the
 wheel selects a setting. Changes apply immediately and save automatically.
-Esc, Enter, or F2 closes the panel and keeps your choices. Lookup, selection,
+Layout, examples/references, and IPA preferences also save automatically, including
+changes made with F4, e, and p. Esc, Enter, or F2 closes the panel and keeps your choices. Lookup, selection,
 reading position, and navigation history are preserved.
 
 Five built-in palettes are available: `default` (terminal colors with cyan
@@ -153,13 +154,16 @@ you save preferences for a future colored session.
 Preferences live in `config.json` in the platform user configuration directory:
 `$XDG_CONFIG_HOME/dict` (or `~/.config/dict`) on Linux, and
 `~/Library/Application Support/org.wordglide.dict` on macOS. The file is created
-only when you change a setting. Its defaults are:
+only when you change a setting. Appearance and reading defaults are:
 
 ```json
 {
   "color_theme": "default",
   "theme_background": true,
-  "truecolor": true
+  "truecolor": true,
+  "reading_layout": "split",
+  "expand_examples": false,
+  "expand_ipa": false
 }
 ```
 
@@ -179,6 +183,18 @@ python3 scripts/terminal_appearance_smoke.py --data data/sample-pack
 ```
 
 This check isolates preferences in a temporary directory.
+
+After building, check the interaction flow with a prepared sample pack:
+
+```sh
+python3 scripts/terminal_interaction_smoke.py --data data/sample-pack
+```
+
+This exercises find, outline, session navigation, saved reading preferences,
+mouse capture, and terminal restoration using isolated temporary preferences.
+Input movement and deletion respect Unicode graphemes, including combining
+marks and joined emoji. Clicking a prediction places the cursor at the end of
+real input; it does not accept the prediction.
 
 ## Verify a data pack
 
@@ -235,12 +251,12 @@ data and code licenses.
 | Ctrl+J / Ctrl+K in definition | Scroll one line down / up |
 | F4 | Toggle split / focused reading |
 | Ctrl+R | Search session back/forward locations |
-| `F2` | Theme, background, and Truecolor settings; changes save automatically |
+| `F2` | Appearance and reading settings; changes save automatically |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |
 | Click a candidate | Select it and preview it, keeping input focus |
 | Click the highlighted candidate again | Accept it and focus the definition |
-| Click in the input box | Return focus to the input, without moving the cursor |
+| Click in the input box | Focus input and place the cursor at the clicked grapheme |
 | Esc | Undo active completion, cancel hints, or return input focus |
 | Ctrl+Z | Return to the previous query, selection, focus, and scroll |
 | Ctrl+Y | Go forward again after going back |

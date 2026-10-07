@@ -87,6 +87,7 @@ pub(crate) struct ReadingState {
     pub(crate) preview: Option<Preview>,
     pub(crate) preferences: ReadingPreferences,
     pub(crate) restore_anchor: Option<Anchor>,
+    pub(crate) restore_scroll: usize,
     pub(crate) find: String,
     pub(crate) matches: Vec<Match>,
     pub(crate) match_index: usize,
@@ -386,6 +387,18 @@ fn append_entry(
 }
 
 impl App {
+    pub(crate) fn cancel_find(&mut self) {
+        if let Some((scroll, anchor, find, index)) = self.reading.find_original.take() {
+            self.scroll = anchor
+                .as_ref()
+                .and_then(|a| self.reading.row_for_anchor(a))
+                .unwrap_or(scroll)
+                .min(self.max_scroll);
+            self.reading.find = find;
+            self.reading.match_index = index;
+            self.reading.update_matches();
+        }
+    }
     pub(crate) fn find_start(&mut self) {
         self.reading.find_original = Some((
             self.scroll,
@@ -450,9 +463,18 @@ impl App {
                 (i + 1) as isize,
                 format!(
                     "→ {}",
-                    l.preview
+                    if l.preview
                         .as_ref()
-                        .map_or(l.input.as_str(), |p| p.entry.headword.as_str())
+                        .is_some_and(|p| p.entry.headword != l.input)
+                    {
+                        format!(
+                            "{} · {}",
+                            l.input,
+                            l.preview.as_ref().unwrap().entry.headword
+                        )
+                    } else {
+                        l.input.clone()
+                    }
                 ),
             )
         }));

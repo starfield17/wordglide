@@ -104,6 +104,11 @@ fn logical_line(source: &LogicalLine, theme: Theme) -> ReadingLine {
 /// no terminal styles, so themes can change without rebuilding text.
 pub(super) fn prepare_reading(app: &mut App, width: usize) {
     let Some(preview) = app.preview.as_ref() else {
+        app.reading.lines.clear();
+        app.reading.sections.clear();
+        app.reading.rows.clear();
+        app.reading.preview = None;
+        app.reading.width = 0;
         return;
     };
     let preferences = app.reading_preferences();
@@ -115,13 +120,18 @@ pub(super) fn prepare_reading(app: &mut App, width: usize) {
     if !reflow && app.reading.restore_anchor.is_none() {
         return;
     }
-    let anchor = app.reading.restore_anchor.take().or_else(|| {
-        if same {
-            app.reading.anchor(app.scroll)
-        } else {
-            None
-        }
-    });
+    let anchor = app
+        .reading
+        .restore_anchor
+        .take()
+        .filter(|_| app.scroll == app.reading.restore_scroll)
+        .or_else(|| {
+            if same {
+                app.reading.anchor(app.scroll)
+            } else {
+                None
+            }
+        });
     if rebuild {
         let (lines, sections) = document(preview, preferences);
         app.reading.lines = lines;
@@ -131,6 +141,9 @@ pub(super) fn prepare_reading(app: &mut App, width: usize) {
         app.reading.update_matches();
     }
     if reflow {
+        if app.picking {
+            app.label_input.clear();
+        }
         let mut rows = Vec::new();
         for (logical, source) in app.reading.lines.iter().enumerate() {
             let mut from = 0;

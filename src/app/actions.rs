@@ -105,6 +105,10 @@ impl Action {
 
 impl App {
     pub(crate) fn open_panel(&mut self, panel: Overlay) {
+        if self.view.overlay == Overlay::Find {
+            self.cancel_find();
+        }
+
         self.view.overlay = if self.view.overlay == panel {
             Overlay::None
         } else {
@@ -118,7 +122,14 @@ impl App {
         match action {
             Action::Accept | Action::Complete if self.results.is_empty() => Some("No candidate"),
             Action::Prediction if self.inline_candidate().is_none() => Some("No prediction"),
-            Action::Follow | Action::Top | Action::Bottom | Action::Examples | Action::Ipa
+            Action::Follow
+            | Action::Find
+            | Action::Outline
+            | Action::Layout
+            | Action::Top
+            | Action::Bottom
+            | Action::Examples
+            | Action::Ipa
                 if self.preview.is_none() || self.loading =>
             {
                 Some("No ready definition")
@@ -260,8 +271,8 @@ impl App {
         match self.view.overlay {
             Overlay::Appearance => match key.code {
                 KeyCode::Esc | KeyCode::Enter => self.view.overlay = Overlay::None,
-                KeyCode::Up => self.view.appearance_row = (self.view.appearance_row + 2) % 3,
-                KeyCode::Down => self.view.appearance_row = (self.view.appearance_row + 1) % 3,
+                KeyCode::Up => self.view.appearance_row = (self.view.appearance_row + 5) % 6,
+                KeyCode::Down => self.view.appearance_row = (self.view.appearance_row + 1) % 6,
                 KeyCode::Left => self.change_appearance(true),
                 KeyCode::Right | KeyCode::Char(' ') => self.change_appearance(false),
                 _ => {}
@@ -273,10 +284,16 @@ impl App {
                 KeyCode::Up => self.view.help_scroll = self.view.help_scroll.saturating_sub(1),
                 KeyCode::Down => self.view.help_scroll = self.view.help_scroll.saturating_add(1),
                 KeyCode::PageUp => {
-                    self.view.help_scroll = self.view.help_scroll.saturating_sub(self.page)
+                    self.view.help_scroll = self
+                        .view
+                        .help_scroll
+                        .saturating_sub(self.view.help_page.max(1))
                 }
                 KeyCode::PageDown => {
-                    self.view.help_scroll = self.view.help_scroll.saturating_add(self.page)
+                    self.view.help_scroll = self
+                        .view
+                        .help_scroll
+                        .saturating_add(self.view.help_page.max(1))
                 }
                 KeyCode::Home => self.view.help_scroll = 0,
                 KeyCode::End => self.view.help_scroll = usize::MAX,
@@ -297,7 +314,15 @@ impl App {
                     }
                 }
                 KeyCode::Backspace => {
-                    self.panel_query.pop();
+                    {
+                        use unicode_segmentation::UnicodeSegmentation;
+                        let start = self
+                            .panel_query
+                            .grapheme_indices(true)
+                            .next_back()
+                            .map_or(0, |(byte, _)| byte);
+                        self.panel_query.truncate(start);
+                    }
                     self.view.panel_row = 0;
                 }
                 KeyCode::Char(c)
@@ -329,7 +354,15 @@ impl App {
                     KeyCode::End => self.view.panel_row = count.saturating_sub(1),
                     KeyCode::Enter => self.accept_panel_row(),
                     KeyCode::Backspace if self.view.overlay == Overlay::History => {
-                        self.panel_query.pop();
+                        {
+                            use unicode_segmentation::UnicodeSegmentation;
+                            let start = self
+                                .panel_query
+                                .grapheme_indices(true)
+                                .next_back()
+                                .map_or(0, |(byte, _)| byte);
+                            self.panel_query.truncate(start);
+                        }
                         self.view.panel_row = 0;
                     }
                     KeyCode::Char(c)
@@ -344,16 +377,7 @@ impl App {
             }
             Overlay::Find => match key.code {
                 KeyCode::Esc => {
-                    if let Some((scroll, anchor, find, index)) = self.reading.find_original.take() {
-                        self.scroll = anchor
-                            .as_ref()
-                            .and_then(|a| self.reading.row_for_anchor(a))
-                            .unwrap_or(scroll)
-                            .min(self.max_scroll);
-                        self.reading.find = find;
-                        self.reading.match_index = index;
-                        self.reading.update_matches();
-                    }
+                    self.cancel_find();
                     self.view.overlay = Overlay::None;
                 }
                 KeyCode::Enter => {
@@ -361,7 +385,15 @@ impl App {
                     self.view.overlay = Overlay::None;
                 }
                 KeyCode::Backspace => {
-                    self.panel_query.pop();
+                    {
+                        use unicode_segmentation::UnicodeSegmentation;
+                        let start = self
+                            .panel_query
+                            .grapheme_indices(true)
+                            .next_back()
+                            .map_or(0, |(byte, _)| byte);
+                        self.panel_query.truncate(start);
+                    }
                     self.find_update();
                 }
                 KeyCode::Down => self.next_match(false),

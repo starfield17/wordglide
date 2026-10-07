@@ -8,6 +8,7 @@ pub(crate) struct ViewOptions {
     pub(crate) appearance_row: usize,
     pub(crate) panel_row: usize,
     pub(crate) help_scroll: usize,
+    pub(crate) help_page: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

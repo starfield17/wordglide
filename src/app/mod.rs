@@ -145,7 +145,17 @@ impl App {
         match self.view.appearance_row {
             0 => appearance.color_theme = appearance.color_theme.cycle(backwards),
             1 => appearance.theme_background = !appearance.theme_background,
-            _ => appearance.truecolor = !appearance.truecolor,
+            2 => appearance.truecolor = !appearance.truecolor,
+            3 => {
+                self.view.reading_layout = if self.view.reading_layout == ReadingLayout::Split {
+                    ReadingLayout::Focus
+                } else {
+                    ReadingLayout::Split
+                }
+            }
+            4 => self.view.expand_examples = !self.view.expand_examples,
+            5 => self.view.expand_ipa = !self.view.expand_ipa,
+            _ => {}
         }
     }
 
@@ -277,6 +287,8 @@ impl App {
             return;
         }
         self.selected = selected;
+        self.reading.clear_find();
+        self.reading.restore_anchor = None;
         self.scroll = 0;
         self.max_scroll = 0;
         self.error = None;
@@ -318,7 +330,17 @@ impl App {
             scroll: self.scroll,
             focus: self.focus,
             loading: self.loading,
-            anchor: self.reading.anchor(self.scroll),
+            anchor: self
+                .reading
+                .restore_anchor
+                .clone()
+                .filter(|_| self.scroll == self.reading.restore_scroll)
+                .or_else(|| {
+                    self.preview
+                        .as_ref()
+                        .filter(|p| self.reading.same_preview(p))
+                        .and_then(|_| self.reading.anchor(self.scroll))
+                }),
         }
     }
 }

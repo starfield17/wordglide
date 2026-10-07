@@ -1,5 +1,5 @@
 //! Appearance file I/O belongs to the terminal session, never to lookup workers.
-use crate::{Appearance, AppearanceOverrides};
+use crate::{Appearance, AppearanceOverrides, ReadingPreferences};
 use anyhow::{Context, Result, bail};
 use serde_json::{Map, Value};
 use std::{
@@ -14,6 +14,8 @@ pub(crate) struct ConfigStore {
     saved: Appearance,
     values: Map<String, Value>,
     pending: AppearanceOverrides,
+    saved_reading: ReadingPreferences,
+    pending_reading: Map<String, Value>,
 }
 
 impl ConfigStore {
@@ -46,15 +48,50 @@ impl ConfigStore {
                         .display()
                 )
             })?;
+        let saved_reading: ReadingPreferences =
+            serde_json::from_value(Value::Object(values.clone())).with_context(|| {
+                format!(
+                    "Invalid reading configuration at {}",
+                    path.as_deref()
+                        .unwrap_or(Path::new("config.json"))
+                        .display()
+                )
+            })?;
         Ok((
             Self {
                 path,
                 saved,
                 values,
                 pending: AppearanceOverrides::default(),
+                saved_reading,
+                pending_reading: Map::new(),
             },
             overrides.apply(saved),
         ))
+    }
+
+    pub(crate) fn reading_preferences(&self) -> ReadingPreferences {
+        self.saved_reading
+    }
+
+    pub(crate) fn save_preferences(
+        &mut self,
+        before: Appearance,
+        after: Appearance,
+        reading_before: ReadingPreferences,
+        reading_after: ReadingPreferences,
+    ) -> Result<bool> {
+        let before_reading = serde_json::to_value(reading_before)?;
+        let after_reading = serde_json::to_value(reading_after)?;
+        for (key, value) in after_reading
+            .as_object()
+            .context("Reading preferences must be an object")?
+        {
+            if before_reading.get(key) != Some(value) {
+                self.pending_reading.insert(key.clone(), value.clone());
+            }
+        }
+        self.save_change(before, after)
     }
 
     /// Persist only fields the user changed, rather than unrelated CLI overrides.
@@ -80,12 +117,22 @@ impl ConfigStore {
                 .context("Appearance must be an object")?
                 .clone(),
         );
+        let mut reading_values = serde_json::to_value(self.saved_reading)?
+            .as_object()
+            .context("Reading preferences must be an object")?
+            .clone();
+        reading_values.extend(self.pending_reading.clone());
+        let saved_reading =
+            serde_json::from_value::<ReadingPreferences>(Value::Object(reading_values.clone()))?;
+        values.extend(reading_values);
         let mut bytes = serde_json::to_vec_pretty(&values)?;
         bytes.push(b'\n');
         atomic_write(path, &bytes).with_context(|| {
             format!("Cannot save appearance configuration at {}", path.display())
         })?;
         self.saved = saved;
+        self.saved_reading = saved_reading;
+        self.pending_reading.clear();
         self.values = values;
         self.pending = AppearanceOverrides::default();
         Ok(true)

@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::*;
 
@@ -10,17 +11,17 @@ fn word_char(c: char) -> bool {
 fn prev_word_boundary(text: &str, cursor: usize) -> usize {
     let mut index = cursor.min(text.len());
     while index > 0 {
-        let previous = text[..index].chars().next_back().unwrap();
-        if previous.is_whitespace() {
-            index -= previous.len_utf8();
+        let previous = text[..index].graphemes(true).next_back().unwrap();
+        if previous.chars().all(char::is_whitespace) {
+            index -= previous.len();
         } else {
             break;
         }
     }
     while index > 0 {
-        let previous = text[..index].chars().next_back().unwrap();
-        if word_char(previous) {
-            index -= previous.len_utf8();
+        let previous = text[..index].graphemes(true).next_back().unwrap();
+        if previous.chars().any(word_char) {
+            index -= previous.len();
         } else {
             break;
         }
@@ -32,17 +33,17 @@ fn prev_word_boundary(text: &str, cursor: usize) -> usize {
 fn next_word_boundary(text: &str, cursor: usize) -> usize {
     let mut index = cursor.min(text.len());
     while index < text.len() {
-        let next = text[index..].chars().next().unwrap();
-        if next.is_whitespace() {
-            index += next.len_utf8();
+        let next = text[index..].graphemes(true).next().unwrap();
+        if next.chars().all(char::is_whitespace) {
+            index += next.len();
         } else {
             break;
         }
     }
     while index < text.len() {
-        let next = text[index..].chars().next().unwrap();
-        if word_char(next) {
-            index += next.len_utf8();
+        let next = text[index..].graphemes(true).next().unwrap();
+        if next.chars().any(word_char) {
+            index += next.len();
         } else {
             break;
         }
@@ -114,6 +115,7 @@ impl App {
                     let previous = prev_word_boundary(&self.input, self.cursor);
                     self.input.drain(previous..self.cursor);
                     self.cursor = previous;
+                    self.snap_cursor();
                     self.search();
                 }
                 KeyCode::Char('j') if self.focus == Focus::Definition => {
@@ -155,6 +157,7 @@ impl App {
                     let previous = prev_word_boundary(&self.input, self.cursor);
                     self.input.drain(previous..self.cursor);
                     self.cursor = previous;
+                    self.snap_cursor();
                     self.search();
                 }
                 _ => {}
@@ -250,40 +253,53 @@ impl App {
             KeyCode::End if self.focus == Focus::Definition => self.scroll = self.max_scroll,
             KeyCode::Left if self.focus == Focus::Input => {
                 self.cursor = self.input[..self.cursor]
-                    .char_indices()
-                    .last()
+                    .grapheme_indices(true)
+                    .next_back()
                     .map_or(0, |(i, _)| i)
             }
             KeyCode::Right if self.focus == Focus::Input => {
                 if self.inline_candidate().is_some() {
                     self.accept_inline();
-                } else if let Some(c) = self.input[self.cursor..].chars().next() {
-                    self.cursor += c.len_utf8();
+                } else if let Some(c) = self.input[self.cursor..].graphemes(true).next() {
+                    self.cursor += c.len();
                 }
             }
             KeyCode::Home if self.focus == Focus::Input => self.cursor = 0,
             KeyCode::End if self.focus == Focus::Input => self.cursor = self.input.len(),
             KeyCode::Backspace if self.focus == Focus::Input && self.cursor > 0 => {
                 let previous = self.input[..self.cursor]
-                    .char_indices()
-                    .last()
+                    .grapheme_indices(true)
+                    .next_back()
                     .map_or(0, |(i, _)| i);
                 self.input.drain(previous..self.cursor);
                 self.cursor = previous;
+                self.snap_cursor();
                 self.search();
             }
             KeyCode::Delete if self.focus == Focus::Input => {
-                if let Some(c) = self.input[self.cursor..].chars().next() {
-                    self.input.drain(self.cursor..self.cursor + c.len_utf8());
+                if let Some(c) = self.input[self.cursor..].graphemes(true).next() {
+                    self.input.drain(self.cursor..self.cursor + c.len());
+                    self.snap_cursor();
                     self.search();
                 }
             }
             KeyCode::Char(c) if self.focus == Focus::Input => {
                 self.input.insert(self.cursor, c);
                 self.cursor += c.len_utf8();
+                self.snap_cursor();
                 self.search();
             }
             _ => {}
+        }
+    }
+
+    fn snap_cursor(&mut self) {
+        if let Some((byte, grapheme)) = self
+            .input
+            .grapheme_indices(true)
+            .find(|(byte, g)| *byte < self.cursor && self.cursor < *byte + g.len())
+        {
+            self.cursor = byte + grapheme.len();
         }
     }
 
@@ -312,6 +328,7 @@ impl App {
                 .collect();
             self.input.insert_str(self.cursor, &clean);
             self.cursor += clean.len();
+            self.snap_cursor();
             self.search();
         }
     }

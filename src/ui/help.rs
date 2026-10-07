@@ -27,7 +27,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
-fn help_lines(theme: Theme) -> Vec<Line<'static>> {
+fn help_lines(theme: Theme, focus: Focus) -> Vec<Line<'static>> {
     let heading = |text: &str| Line::styled(text.to_string(), theme.heading());
     let body = |text: &str| {
         let (keys, description) = text.split_once(" · ").unwrap_or((text, ""));
@@ -43,7 +43,7 @@ fn help_lines(theme: Theme) -> Vec<Line<'static>> {
             ),
         ])
     };
-    vec![
+    let mut lines = vec![
         heading("Lookup"),
         body("  Type to search · Enter accept and read · Ctrl+L switch focus"),
         body("  ↑/↓ or Ctrl+P/N select · Tab/Shift+Tab complete · → or Ctrl+F accept prediction"),
@@ -65,7 +65,24 @@ fn help_lines(theme: Theme) -> Vec<Line<'static>> {
         body("  Ctrl+Z back · Ctrl+Y forward · Ctrl+C quit · ? or F1 this help"),
         body("  Ctrl+G / F3 actions · Ctrl+R session navigation"),
         body("  F2 appearance: theme, background, Truecolor (auto-saved)"),
-    ]
+    ];
+    if focus == Focus::Definition {
+        let start = lines
+            .iter()
+            .position(|line| line.spans.iter().any(|span| span.content == "Reading"))
+            .unwrap_or(0);
+        let end = lines
+            .iter()
+            .position(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content == "Input editing")
+            })
+            .unwrap_or(start);
+        let reading = lines.drain(start..end).collect::<Vec<_>>();
+        lines.splice(0..0, reading);
+    }
+    lines
 }
 
 pub(super) fn render_help(frame: &mut Frame, app: &mut App) {
@@ -78,7 +95,8 @@ pub(super) fn render_help(frame: &mut Frame, app: &mut App) {
         .title(" Keys · Esc closes ")
         .border_style(app.theme.focused_border());
     let inner = block.inner(area);
-    let lines = help_lines(app.theme);
+    app.view.help_page = inner.height.saturating_sub(1).max(1) as usize;
+    let lines = help_lines(app.theme, app.focus);
     let lines = super::reading::wrap(
         lines
             .into_iter()

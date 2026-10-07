@@ -96,6 +96,7 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
     app.set_color(options.color);
     app.mouse_enabled = options.mouse;
     app.set_appearance(appearance);
+    app.set_reading_preferences(config.reading_preferences());
     if options.config_path.is_none() {
         app.appearance_status = Some("Session only: no configuration path".into());
     }
@@ -127,6 +128,7 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
         }
         if event::poll(Duration::from_millis(if app.loading { 5 } else { 100 }))? {
             let before = app.appearance();
+            let reading_before = app.reading_preferences();
             let mouse_before = app.mouse_enabled;
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -154,12 +156,15 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
                 )?;
             }
             let after = app.appearance();
-            if before != after {
-                app.appearance_status = Some(match config.save_change(before, after) {
-                    Ok(true) => "Saved automatically".into(),
-                    Ok(false) => "Session only: no configuration path".into(),
-                    Err(error) => format!("Not saved: {error:#}"),
-                });
+            let reading_after = app.reading_preferences();
+            if before != after || reading_before != reading_after {
+                app.appearance_status = Some(
+                    match config.save_preferences(before, after, reading_before, reading_after) {
+                        Ok(true) => "Saved automatically".into(),
+                        Ok(false) => "Session only: no configuration path".into(),
+                        Err(error) => format!("Not saved: {error:#}"),
+                    },
+                );
                 dirty = true;
             }
         }

@@ -37,6 +37,7 @@ impl App {
         self.scroll = old.scroll;
         self.reading.clear_find();
         self.reading.restore_anchor = old.anchor;
+        self.reading.restore_scroll = old.scroll;
         self.focus = old.focus;
         self.error = None;
         self.picking = false;
