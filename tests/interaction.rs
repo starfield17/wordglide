@@ -102,7 +102,8 @@ fn candidate_width_is_independent_of_result_word_lengths() {
     settle(&mut app);
     let after = screen(&mut app, 120, 40)[3].clone();
     let corners = |line: &str| {
-        line.char_indices()
+        line.chars()
+            .enumerate()
             .filter(|(_, c)| *c == '╮' || *c == '╭')
             .map(|(i, _)| i)
             .collect::<Vec<_>>()

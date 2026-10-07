@@ -525,7 +525,7 @@ fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
                 );
                 if width >= 120 && height >= 12 {
                     let expected = vec![
-                        format!("Lookup · exact · 1/1 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
+                        format!("Lookup · exact · 1/2 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
                         "Enter read · Tab complete · Ctrl+G actions · F1 help · F2 settings · Ctrl+C quit".into(),
                     ];
                     assert_eq!(
@@ -560,7 +560,7 @@ fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
                 );
                 if width >= 120 && height >= 12 {
                     let expected = vec![
-                        format!("Reading · exact · 1/1 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
+                        format!("Reading · exact · 1/2 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
                         "f follow · Ctrl+G actions · Esc input · F1 help · F2 settings · Ctrl+C quit".into(),
                     ];
                     assert_eq!(
