@@ -52,28 +52,48 @@ fn next_word_boundary(text: &str, cursor: usize) -> usize {
 
 impl App {
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // Overlays own input before completion can queue it or lookup can act.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            self.exit = true;
+            return;
+        }
+        if key.code == KeyCode::F(2) {
+            self.view.show_appearance = !self.view.show_appearance;
+            self.view.show_help = false;
+            return;
+        }
+        if key.code == KeyCode::F(1) {
+            self.view.show_help = !self.view.show_help;
+            self.view.show_appearance = false;
+            return;
+        }
+        if self.view.show_appearance {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => self.view.show_appearance = false,
+                KeyCode::Up => self.view.appearance_row = (self.view.appearance_row + 2) % 3,
+                KeyCode::Down => self.view.appearance_row = (self.view.appearance_row + 1) % 3,
+                KeyCode::Left => self.change_appearance(true),
+                KeyCode::Right | KeyCode::Char(' ') => self.change_appearance(false),
+                _ => {}
+            }
+            return;
+        }
+        // Help is modal even while the initial lookup has no candidates yet.
+        if self.view.show_help {
+            if matches!(
+                key.code,
+                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter | KeyCode::Char(' ')
+            ) {
+                self.view.show_help = false;
+            }
+            return;
+        }
         let completion_key = matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter)
             || (key.code == KeyCode::Right && self.cursor == self.input.len())
             || (key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL));
         if self.focus == Focus::Input && self.loading && self.results.is_empty() && completion_key {
             if self.pending_completion.len() < 64 {
                 self.pending_completion.push(key);
-            }
-            return;
-        }
-        if key.code == KeyCode::F(1) {
-            self.view.show_help = !self.view.show_help;
-            return;
-        }
-        // The help overlay is modal: only Ctrl+C and the closing keys act.
-        if self.view.show_help
-            && !(key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c'))
-        {
-            if matches!(
-                key.code,
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter | KeyCode::Char(' ')
-            ) {
-                self.view.show_help = false;
             }
             return;
         }
@@ -255,6 +275,9 @@ impl App {
     }
 
     pub fn paste(&mut self, text: &str) {
+        if self.view.show_help || self.view.show_appearance {
+            return;
+        }
         if self.focus == Focus::Input {
             let clean: String = text
                 .chars()

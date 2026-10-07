@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
     text::Line,
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -48,6 +48,7 @@ fn help_lines(theme: Theme) -> Vec<Line<'static>> {
         body("  Click a candidate to preview; click it again to accept"),
         heading("Other"),
         body("  Ctrl+Z back · Ctrl+Y forward · Ctrl+C quit · ? or F1 this help"),
+        body("  F2 appearance: theme, background, Truecolor (auto-saved)"),
     ]
 }
 
@@ -56,6 +57,8 @@ pub(super) fn render_help(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(app.theme.surface())
         .title(" Keys · Esc closes ")
         .border_style(app.theme.focused_border());
     frame.render_widget(
@@ -386,5 +389,14 @@ pub(super) fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<Str
         ]
     };
 
+    let mut segments = segments;
+    if !app.picking {
+        segments.push(HelpSegment {
+            text: "F2 appearance".into(),
+            line: 0,
+            order: 6,
+            priority: 11,
+        });
+    }
     format_footer_help(&segments, width, line_count)
 }

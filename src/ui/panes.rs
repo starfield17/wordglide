@@ -3,7 +3,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     text::Line,
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
@@ -27,6 +27,7 @@ pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointe
         .collect();
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(format!(" Candidates · {} ", app.results.len()))
         .border_style(app.theme.idle_border());
     let inner = block.inner(area);
@@ -81,6 +82,7 @@ pub(super) fn render_definition(
     };
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(title)
         .border_style(app.theme.border(app.focus == Focus::Definition));
     frame.render_widget(block, area);
@@ -121,7 +123,7 @@ pub(super) fn render_definition(
             if app.picking {
                 label_line(l, &map, app.theme)
             } else {
-                Line::styled(l.text.clone(), l.style)
+                l.rendered()
             }
         })
         .collect();

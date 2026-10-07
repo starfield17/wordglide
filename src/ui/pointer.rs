@@ -19,7 +19,7 @@ pub(super) struct Region {
 }
 
 impl Region {
-    fn contains(&self, column: u16, row: u16) -> bool {
+    pub(super) fn contains(&self, column: u16, row: u16) -> bool {
         self.width > 0
             && self.height > 0
             && column >= self.x
@@ -59,6 +59,7 @@ pub(super) struct Pointer {
     pub(super) candidates_offset: usize,
     pub(super) candidates_len: usize,
     rows: Vec<HitRow>,
+    pub(super) appearance_rows: [Region; 3],
 }
 
 impl Pointer {
@@ -69,6 +70,7 @@ impl Pointer {
         self.candidates_offset = 0;
         self.candidates_len = 0;
         self.rows.clear();
+        self.appearance_rows = [Region::default(); 3];
     }
 
     pub(super) fn record_rows(&mut self, inner: Rect, visible: &[&ReadingLine]) {
@@ -119,6 +121,28 @@ impl Pointer {
 /// visible state changed. Motion and drag are ignored so `?1003h` traffic never
 /// forces a redraw.
 pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
+    if app.view.show_appearance {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => app.view.appearance_row = (app.view.appearance_row + 2) % 3,
+            MouseEventKind::ScrollDown => {
+                app.view.appearance_row = (app.view.appearance_row + 1) % 3
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(index) = pointer
+                    .appearance_rows
+                    .iter()
+                    .position(|row| row.contains(mouse.column, mouse.row))
+                {
+                    app.view.appearance_row = index;
+                    app.change_appearance(false);
+                } else {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+        return true;
+    }
     if app.view.show_help {
         if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
             app.view.show_help = false;

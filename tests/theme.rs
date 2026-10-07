@@ -74,14 +74,14 @@ fn definition_border_x(terminal: &Terminal<TestBackend>) -> u16 {
     let buffer = terminal.backend().buffer();
     let mut count = 0;
     for x in 0..buffer.area.width {
-        if buffer[(x, 3)].symbol() == "┌" {
+        if buffer[(x, 3)].symbol() == "╭" {
             count += 1;
             if count == 2 {
                 return x;
             }
         }
     }
-    panic!("second '┌' on border row 3 not found");
+    panic!("second '╭' on border row 3 not found");
 }
 
 #[test]

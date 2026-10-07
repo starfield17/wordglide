@@ -1,10 +1,11 @@
+mod appearance;
 mod help;
 mod panes;
 mod pointer;
 mod reading;
 mod terminal;
 
-pub use terminal::run;
+pub use terminal::{RunOptions, run, run_with_options};
 
 use crate::{App, Focus};
 use help::{footer_help, render_help};
@@ -14,7 +15,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -37,6 +38,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     pointer.reset();
     let area = frame.area();
+    frame.render_widget(Block::default().style(app.theme.surface()), area);
     if area.width < 30 || area.height < 10 {
         frame.render_widget(
             Paragraph::new("Resize to at least 30 × 10. Ctrl+C exits."),
@@ -55,6 +57,7 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
     pointer.input = Region::from(rows[0]);
     let input_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(" Wordglide · English ")
         .border_style(app.theme.border(app.focus == Focus::Input));
     let available = rows[0].width.saturating_sub(3) as usize;
@@ -71,7 +74,8 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
         .block(input_block),
         rows[0],
     );
-    if app.focus == Focus::Input && !app.picking {
+    if app.focus == Focus::Input && !app.picking && !app.view.show_help && !app.view.show_appearance
+    {
         frame.set_cursor_position((
             rows[0].x + 1 + before[start..].width() as u16,
             rows[0].y + 1,
@@ -112,5 +116,8 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
     );
     if app.view.show_help {
         render_help(frame, app);
+    }
+    if app.view.show_appearance {
+        appearance::render_appearance(frame, app, pointer);
     }
 }

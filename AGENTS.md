@@ -16,9 +16,12 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `src/store.rs`, `src/build.rs`: lightweight open, explicit full verification, pack assembly.
 - `src/app/`: navigation state, asynchronous result ownership, keys, completion, history, worker, and view options.
 - `src/ui/`: rendering, reading layout, panes, help, and mouse hit-testing.
-- `src/theme.rs`: color roles and `NO_COLOR` handling.
+- `src/theme.rs`: built-in palettes, appearance types, color roles, RGB-to-256 conversion.
+- `src/config.rs`: appearance-only configuration loading and atomic saving.
+- `src/ui/appearance.rs`: F2 appearance panel; terminal entry owns persistence.
 - `scripts/prepare.py`: raw Wiktextract validation/normalization and wordfreq scoring.
 - `scripts/terminal_smoke.py`: actual POSIX PTY input and terminal restoration check.
+- `scripts/terminal_appearance_smoke.py`: PTY theme, save/retry, color-mode and restart checks.
 - `scripts/package.py`: validated program/data/bundle release archives.
 - `.github/workflows/release.yml`: tag-triggered native builds and publication.
 - `data-release.json`: pinned dictionary Release asset and checksum; CI input only.

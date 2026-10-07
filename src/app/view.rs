@@ -4,4 +4,6 @@ pub(crate) struct ViewOptions {
     pub(crate) expand_ipa: bool,
     pub(crate) expand_examples: bool,
     pub(crate) show_help: bool,
+    pub(crate) show_appearance: bool,
+    pub(crate) appearance_row: usize,
 }

@@ -2,7 +2,10 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use directories::ProjectDirs;
 use std::path::{Path, PathBuf};
-use wordglide::{Dictionary, PackInfo, pack_info, run, verify_pack};
+use wordglide::{
+    AppearanceOverrides, Dictionary, PackInfo, RunOptions, ThemePreset, pack_info,
+    run_with_options, verify_pack,
+};
 
 #[derive(Parser)]
 #[command(
@@ -27,13 +30,22 @@ struct Args {
     /// Disable mouse capture, keeping native terminal text selection.
     #[arg(long)]
     no_mouse: bool,
+    /// Reading palette: default, orange, gruvbox_light, gruvbox_dark_v2, whiteout.
+    #[arg(long)]
+    theme: Option<ThemePreset>,
+    /// Use the theme's background instead of the terminal background.
+    #[arg(long, action = clap::ArgAction::Set)]
+    theme_background: Option<bool>,
+    /// Use RGB colors; false converts them to xterm 256 colors.
+    #[arg(long, action = clap::ArgAction::Set)]
+    truecolor: Option<bool>,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     let executable = std::env::current_exe().context("Cannot locate executable")?;
-    let user_data =
-        ProjectDirs::from("org", "wordglide", "dict").map(|d| d.data_dir().join("english"));
+    let project_dirs = ProjectDirs::from("org", "wordglide", "dict");
+    let user_data = project_dirs.as_ref().map(|d| d.data_dir().join("english"));
     let env_data = std::env::var_os("WORDGLIDE_DATA")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
@@ -53,11 +65,19 @@ fn main() -> Result<()> {
     }
     let dict = Dictionary::open(&path)?;
     let color = color_enabled(args.no_color);
-    run(
+    run_with_options(
         dict,
         args.query.as_deref().unwrap_or(""),
-        color,
-        !args.no_mouse,
+        RunOptions {
+            color,
+            mouse: !args.no_mouse,
+            appearance: AppearanceOverrides {
+                color_theme: args.theme,
+                theme_background: args.theme_background,
+                truecolor: args.truecolor,
+            },
+            config_path: project_dirs.map(|d| d.config_dir().join("config.json")),
+        },
     )
 }
 

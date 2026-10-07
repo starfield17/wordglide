@@ -77,6 +77,72 @@ to either location, or keep using `--data`. The application never downloads data
 Add `--no-color` (or set `NO_COLOR`) for a color-free rendering, and `--no-mouse`
 to keep native terminal text selection.
 
+## Themes and appearance
+
+Press **F2** from either pane to open appearance settings. Use ↑/↓ to choose a
+setting and ←/→ or Space to change it; clicking a setting changes it, and the
+wheel selects a setting. Changes apply immediately and save automatically.
+Esc, Enter, or F2 closes the panel and keeps your choices. Lookup, selection,
+reading position, and navigation history are preserved.
+
+Five built-in palettes are available: `default` (terminal colors with cyan
+accents), `orange` (black and warm amber), `gruvbox_light` (cream),
+`gruvbox_dark_v2` (warm dark gray), and `whiteout` (white with blue accents).
+The latter four are reading-oriented adaptations of
+[btop palettes](https://github.com/aristocratos/btop/tree/main/themes).
+Headwords are emphasized separately from part of speech and IPA; examples and
+source references use secondary colors. Panes have rounded borders.
+
+**Theme background** uses the palette's background when on; off uses your
+terminal's background, including any transparency configured in the terminal.
+Selected rows and follow hints retain their local backgrounds. The `default`
+palette always uses the terminal background. Dark text from a light
+palette can be hard to read on a dark terminal background, and vice versa;
+choose a palette that matches your terminal when theme background is off.
+
+**Truecolor** uses RGB colors when on; off converts palette colors to xterm 256
+colors. Both switches default to on. The default palette uses ANSI colors in
+either mode. These per-session arguments override saved preferences:
+
+```sh
+wordglide --theme gruvbox_dark_v2
+wordglide --theme orange --theme-background=false --truecolor=false
+```
+
+`--no-color` and non-empty `NO_COLOR` take priority over appearance preferences:
+the screen uses terminal colors, bold, italics, and reverse video. F2 still lets
+you save preferences for a future colored session.
+
+Preferences live in `config.json` in the platform user configuration directory:
+`$XDG_CONFIG_HOME/dict` (or `~/.config/dict`) on Linux, and
+`~/Library/Application Support/org.wordglide.dict` on macOS. The file is created
+only when you change a setting. Its defaults are:
+
+```json
+{
+  "color_theme": "default",
+  "theme_background": true,
+  "truecolor": true
+}
+```
+
+Launch arguments alone do not write this file. Changing a setting in F2 saves
+only that field, preserving unrelated launch overrides as session-only choices.
+If a save fails, the current session keeps the change and the panel reports
+"Not saved"; a later change retries all unsaved edits. Invalid configuration
+reports its path before the terminal UI opens and leaves the file untouched.
+`--info` and `--verify-data` ignore appearance configuration. Custom themes and
+btop `.theme` imports are not supported.
+
+After building, exercise appearance settings and terminal restoration with a
+prepared sample pack:
+
+```sh
+python3 scripts/terminal_appearance_smoke.py --data data/sample-pack
+```
+
+This check isolates preferences in a temporary directory.
+
 ## Verify a data pack
 
 Normal startup checks schema, file lengths, compact-index layout, and database
@@ -124,6 +190,7 @@ data and code licenses.
 | `e` in definition | Examples and references: compact / full |
 | `p` in definition | Pronunciation (IPA): short / full |
 | `?` in definition / `F1` | Show the key help; Esc closes it |
+| `F2` | Theme, background, and Truecolor settings; changes save automatically |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |
 | Click a candidate | Select it and preview it, keeping input focus |

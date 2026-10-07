@@ -8,6 +8,8 @@ Delivery: Rust `wordglide [QUERY] [--data PACK_DIRECTORY] [--no-color]
 [--no-mouse]`, plus `--info` and `--verify-data`; macOS and Linux
 terminals only. Windows is out of scope for now: no Windows target is built and
 only POSIX terminals are exercised, so do not add Windows-only paths.
+Appearance delivery also accepts `--theme NAME`, `--theme-background=true|false`,
+and `--truecolor=true|false`; these overrides are session-only.
 Quality: readable source-grounded English definitions, deterministic ranking;
 no Enter to search. Startup loads only compact, prebuilt indexes. Warm-session input-to-draw P95
 target <=50 ms, resident-memory target <=512 MiB on the full data pack.
@@ -64,6 +66,30 @@ the entry and shows scroll progress. Candidate panes size to their content, and
 a definition retained during loading is dimmed. An error is shown as a banner
 above the last good definition. Existing phrases included. Navigation history
 is session-only and does not affect ranking.
+Appearance: five built-in palettes (`default`, `orange`, `gruvbox_light`,
+`gruvbox_dark_v2`, `whiteout`), the latter four adapted from btop for reading.
+Headword emphasis is separate from POS/IPA; examples and sources use readable
+secondary colors. Panes use rounded borders without changing layout density.
+F2 opens a modal appearance panel from either focus, exclusive with key help.
+Up/Down or the wheel select a setting; Left/Right, Space, or a row click change
+it immediately. Esc, Enter, and F2 close without reverting. The panel swallows
+lookup keys and paste; pending completions wait until overlays close. Query,
+selection, reading position, focus, hints, and session history are preserved.
+`theme_background` and `truecolor` default to true. Background off restores the
+terminal base background but retains local selection and hint backgrounds;
+default always inherits the terminal base colors. Truecolor off converts RGB
+to nearest xterm fixed 256-color cube/grayscale entries; default ANSI colors
+are retained. `--no-color` or non-empty `NO_COLOR` suppresses all explicit
+foreground/background colors while preserving stored appearance preferences.
+Configuration: platform user config directory from ProjectDirs, `config.json`,
+appearance fields `color_theme`, `theme_background`, `truecolor` only.
+Precedence is CLI overrides > saved preferences > defaults. Loading never
+creates a file. Panel changes atomically save only edited fields, preserving
+unknown JSON keys and unrelated CLI overrides. Save failure retains session
+changes and reports "Not saved"; later edits retry all pending changes. Invalid
+config or an unknown stored theme fails before raw mode and is never overwritten.
+`--info` and `--verify-data` bypass appearance configuration. Preference file I/O
+belongs to the terminal session, never the dictionary worker or data pack.
 
 ## Do not build
 - N1 No network or LLM dependencies in the runtime.
@@ -90,4 +116,5 @@ Boundary check: compiler privacy/doc test; runtime owns no downloader.
   revision and a rebuilt pack.
 - Candidate rows carry no part of speech; adding one needs a schema-3 index
   record or a per-candidate database read, both deferred.
-
+- Custom theme files and btop `.theme` imports are deferred; only built-in
+  palettes are supported. No automatic light/dark detection or theme downloads.

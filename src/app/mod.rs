@@ -4,7 +4,7 @@ mod keys;
 mod view;
 mod worker;
 
-use crate::{Candidate, Dictionary, Preview, normalize, store::Lexicon, theme::Theme};
+use crate::{Appearance, Candidate, Dictionary, Preview, normalize, store::Lexicon, theme::Theme};
 use crossterm::event::KeyEvent;
 use std::{collections::VecDeque, sync::mpsc};
 
@@ -51,6 +51,7 @@ pub struct App {
     pub(crate) page: usize,
     pub(crate) theme: Theme,
     pub(crate) view: ViewOptions,
+    pub(crate) appearance_status: Option<String>,
     lexicon: Lexicon,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
@@ -83,6 +84,7 @@ impl App {
             page: 10,
             theme: Theme::colored(),
             view: ViewOptions::default(),
+            appearance_status: None,
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -96,13 +98,28 @@ impl App {
         app
     }
 
-    /// Select the colored or color-free rendering theme.
+    /// Enable or suppress colors without changing appearance preferences.
     pub fn set_color(&mut self, color: bool) {
-        self.theme = if color {
-            Theme::colored()
-        } else {
-            Theme::plain()
-        };
+        self.theme.color = color;
+    }
+
+    /// Apply appearance preferences without modifying lookup or reading state.
+    /// File persistence is owned by `run_with_options`, not by `App`.
+    pub fn set_appearance(&mut self, appearance: Appearance) {
+        self.theme.appearance = appearance;
+    }
+
+    pub fn appearance(&self) -> Appearance {
+        self.theme.appearance
+    }
+
+    pub(crate) fn change_appearance(&mut self, backwards: bool) {
+        let appearance = &mut self.theme.appearance;
+        match self.view.appearance_row {
+            0 => appearance.color_theme = appearance.color_theme.cycle(backwards),
+            1 => appearance.theme_background = !appearance.theme_background,
+            _ => appearance.truecolor = !appearance.truecolor,
+        }
     }
 
     /// Render without color; equivalent to `set_color(false)`.
@@ -193,7 +210,11 @@ impl App {
                 _ => {}
             }
         }
-        if !self.loading && !self.pending_completion.is_empty() {
+        if !self.loading
+            && !self.pending_completion.is_empty()
+            && !self.view.show_help
+            && !self.view.show_appearance
+        {
             let pending = std::mem::take(&mut self.pending_completion);
             let generation = self.generation;
             for key in pending {

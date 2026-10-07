@@ -1,4 +1,4 @@
-use crate::{App, Dictionary};
+use crate::{App, AppearanceOverrides, Dictionary, config::ConfigStore};
 use anyhow::Result;
 use crossterm::{
     Command,
@@ -7,7 +7,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::{fmt, io, time::Duration};
+use std::{fmt, io, path::PathBuf, time::Duration};
 
 use super::pointer::{Pointer, on_mouse};
 use super::render;
@@ -56,8 +56,48 @@ impl Drop for TerminalGuard {
 }
 
 pub fn run(dictionary: Dictionary, query: &str, color: bool, mouse: bool) -> Result<()> {
+    run_with_options(
+        dictionary,
+        query,
+        RunOptions {
+            color,
+            mouse,
+            ..RunOptions::default()
+        },
+    )
+}
+
+/// Terminal session options. Without a configuration path, changes are session-only.
+#[derive(Clone, Debug)]
+pub struct RunOptions {
+    pub color: bool,
+    pub mouse: bool,
+    pub appearance: AppearanceOverrides,
+    pub config_path: Option<PathBuf>,
+}
+
+impl Default for RunOptions {
+    fn default() -> Self {
+        Self {
+            color: true,
+            mouse: true,
+            appearance: AppearanceOverrides::default(),
+            config_path: None,
+        }
+    }
+}
+
+/// Load preferences before entering raw mode, then persist panel changes.
+/// Session overrides never write configuration merely by starting the program.
+pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions) -> Result<()> {
+    let (mut config, appearance) =
+        ConfigStore::load(options.config_path.clone(), options.appearance)?;
     let mut app = App::new(dictionary, query);
-    app.set_color(color);
+    app.set_color(options.color);
+    app.set_appearance(appearance);
+    if options.config_path.is_none() {
+        app.appearance_status = Some("Session only: no configuration path".into());
+    }
     let old_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
@@ -72,7 +112,7 @@ pub fn run(dictionary: Dictionary, query: &str, color: bool, mouse: bool) -> Res
     enable_raw_mode()?;
     let _guard = TerminalGuard;
     execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
-    if mouse {
+    if options.mouse {
         execute!(io::stdout(), MOUSE_ON)?;
     }
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
@@ -85,6 +125,7 @@ pub fn run(dictionary: Dictionary, query: &str, color: bool, mouse: bool) -> Res
             dirty = false;
         }
         if event::poll(Duration::from_millis(5))? {
+            let before = app.appearance();
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     app.handle_key(key);
@@ -101,6 +142,15 @@ pub fn run(dictionary: Dictionary, query: &str, color: bool, mouse: bool) -> Res
                     dirty = true;
                 }
                 _ => {}
+            }
+            let after = app.appearance();
+            if before != after {
+                app.appearance_status = Some(match config.save_change(before, after) {
+                    Ok(true) => "Saved automatically".into(),
+                    Ok(false) => "Session only: no configuration path".into(),
+                    Err(error) => format!("Not saved: {error:#}"),
+                });
+                dirty = true;
             }
         }
     }

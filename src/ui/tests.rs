@@ -58,6 +58,7 @@ fn hard_line_breaks_and_source_controls() {
         vec![ReadingLine {
             text: "first\nsecond\n\u{1b}[31mthird".into(),
             style: Style::default(),
+            styles: Vec::new(),
         }],
         80,
     );
@@ -98,6 +99,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
             vec![ReadingLine {
                 text: long_sense.into(),
                 style: Style::default(),
+                styles: Vec::new(),
             }],
             width,
         );
@@ -116,6 +118,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
             vec![ReadingLine {
                 text: long_example.into(),
                 style: Style::default(),
+                styles: Vec::new(),
             }],
             width,
         );
@@ -137,6 +140,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
             vec![ReadingLine {
                 text: long_reference.into(),
                 style: Style::default(),
+                styles: Vec::new(),
             }],
             width,
         );
@@ -155,6 +159,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
             vec![ReadingLine {
                 text: long_heading.into(),
                 style: Style::default(),
+                styles: Vec::new(),
             }],
             width,
         );
@@ -174,6 +179,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
             vec![ReadingLine {
                 text: long_source.into(),
                 style: Style::default(),
+                styles: Vec::new(),
             }],
             width,
         );
@@ -519,7 +525,7 @@ fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
                 );
                 if width >= 120 && height >= 12 {
                     let expected = vec![
-                        "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll · F1 help".to_string(),
+                        "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll · F1 help · F2 appearance".to_string(),
                         format!(
                             "f follow · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+U new · Ctrl+C quit{}",
                             app.history_len(),
@@ -1019,6 +1025,7 @@ fn stale_style_adds_dim_without_dropping_colour() {
     let styled = ReadingLine {
         text: "house".into(),
         style: Style::default().fg(ratatui::style::Color::Cyan),
+        styles: Vec::new(),
     };
     let stale = stale_style(vec![styled]);
     assert!(stale[0].style.add_modifier.contains(Modifier::DIM));
@@ -1065,4 +1072,149 @@ fn help_overlay_toggles_and_renders() {
 
     stroke(&mut app, KeyCode::Esc);
     assert!(!app.view.show_help);
+}
+
+#[test]
+fn appearance_mouse_is_modal_and_preserves_follow_hints() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fist");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    stroke(&mut app, KeyCode::Char('f'));
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let labels = app.labels.clone();
+    let original = (
+        app.input.clone(),
+        app.selected,
+        app.focus,
+        app.scroll,
+        app.history_len(),
+    );
+    stroke(&mut app, KeyCode::F(2));
+    paint(&mut app, &mut terminal, &mut pointer);
+    let row = pointer.appearance_rows[1];
+    assert!(on_mouse(&mut app, &pointer, click(row.x, row.y)));
+    assert!(!app.appearance().theme_background);
+    assert!(!on_mouse(&mut app, &pointer, click(0, 0)));
+    assert!(on_mouse(
+        &mut app,
+        &pointer,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            ..click(0, 0)
+        }
+    ));
+    assert_eq!(app.view.appearance_row, 2);
+    app.paste("house");
+    assert_eq!(
+        (
+            app.input.clone(),
+            app.selected,
+            app.focus,
+            app.scroll,
+            app.history_len()
+        ),
+        original
+    );
+    stroke(&mut app, KeyCode::F(1));
+    assert!(app.view.show_help);
+    assert!(!app.view.show_appearance);
+    stroke(&mut app, KeyCode::Esc);
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(app.picking);
+    assert_eq!(app.labels, labels);
+}
+
+#[test]
+fn queued_completions_wait_until_appearance_closes() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fis");
+    stroke(&mut app, KeyCode::Right);
+    assert!(app.results.is_empty());
+    stroke(&mut app, KeyCode::F(2));
+    settle(&mut app);
+    assert!(app.view.show_appearance);
+    assert!(!app.loading);
+    assert_eq!(app.appearance().color_theme, crate::ThemePreset::Default);
+    assert_eq!(app.input, "fis");
+    stroke(&mut app, KeyCode::Esc);
+    app.poll();
+    settle(&mut app);
+    assert!(!app.view.show_appearance);
+    assert_eq!(app.input, "fist");
+}
+
+#[test]
+fn appearance_save_failure_is_visible_at_minimum_size() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fist");
+    settle(&mut app);
+    stroke(&mut app, KeyCode::F(2));
+    app.appearance_status =
+        Some("Not saved: Cannot save appearance configuration at a long path".into());
+    for color in [false, true] {
+        app.set_color(color);
+        for (width, height) in [(30, 10), (30, 11), (120, 40)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            let mut pointer = Pointer::default();
+            paint(&mut app, &mut terminal, &mut pointer);
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(
+                text.contains("Not saved"),
+                "failure clipped at {width}×{height}: {text}"
+            );
+            if !color {
+                assert!(text.contains("no color"));
+            }
+        }
+    }
+}
+
+#[test]
+fn unicode_styles_survive_controls_wrapping_and_hint_replacement() {
+    let theme = crate::theme::Theme::colored();
+    let text = "élève  noun\t/ɛ.lɛv/\n界 e\u{301}".to_string();
+    let mut line = ReadingLine::new(text.clone(), theme.heading());
+    line.styles.push(("élève".len()..text.len(), theme.dim()));
+    let lines = wrap(vec![line], 10);
+    assert!(lines.iter().all(|line| line.text.width() <= 10));
+    let all: String = lines.iter().map(|line| line.text.as_str()).collect();
+    assert!(all.contains("élève"));
+    assert!(all.contains("界 e\u{301}"));
+    let heading = &lines[0];
+    let rendered = heading.rendered();
+    assert_eq!(rendered.spans[0].content, "élève");
+    assert_eq!(rendered.spans[0].style, theme.heading());
+    let ipa = lines.iter().find(|line| line.text.contains('/')).unwrap();
+    assert!(
+        ipa.rendered()
+            .spans
+            .iter()
+            .all(|span| span.style == theme.dim())
+    );
+    let map = std::collections::HashMap::from([("élève".to_string(), "ab".to_string())]);
+    let hints = label_line(heading, &map, theme);
+    let text: String = hints
+        .spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect();
+    assert!(text.starts_with("abève"));
+    assert_eq!(text.width(), heading.text.width());
+    assert_eq!(hints.spans[0].style, theme.hint_label());
+    let stale = stale_style(lines);
+    assert!(
+        stale
+            .iter()
+            .flat_map(|line| line.rendered().spans)
+            .all(|span| span.style.add_modifier.contains(Modifier::DIM))
+    );
 }

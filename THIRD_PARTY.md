@@ -2,6 +2,14 @@
 
 Our implementation is independent; no code is copied from `tuidict/`.
 
+The built-in orange, gruvbox_light, gruvbox_dark_v2, and whiteout palettes are
+inspired by the [btop theme collection](https://github.com/aristocratos/btop/tree/main/themes).
+The orange palette credits neocerambyx; gruvbox_light credits kk9uk;
+gruvbox_dark_v2 credits BachoSeven and Pietryszak and the
+[Gruvbox palette](https://github.com/morhetz/gruvbox); whiteout credits
+aristocratos. Wordglide implements its own reading-specific color roles and
+secondary colors; no btop implementation or theme parser is incorporated.
+
 Dictionary text is authored by English Wiktionary contributors. Raw structured
 records come from [Kaikki/Wiktextract](https://kaikki.org/dictionary/rawdata.html).
 Definitions retain source wording. Per-entry Wiktionary URLs identify source
