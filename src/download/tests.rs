@@ -343,7 +343,9 @@ fn rejects_tar_extension_records_even_when_the_resolved_path_is_whitelisted() {
     let fixture = pack();
     let normal = archive(&fixture.path().join("pack"), None);
     let mut original = Vec::new();
-    flate2::read::GzDecoder::new(normal.as_slice()).read_to_end(&mut original).unwrap();
+    flate2::read::GzDecoder::new(normal.as_slice())
+        .read_to_end(&mut original)
+        .unwrap();
     let name = b"english-pack/manifest.json\0";
     let mut header = tar::Header::new_gnu();
     header.set_entry_type(tar::EntryType::GNULongName);
@@ -351,7 +353,9 @@ fn rejects_tar_extension_records_even_when_the_resolved_path_is_whitelisted() {
     header.set_mode(0o644);
     header.set_cksum();
     let mut builder = tar::Builder::new(Vec::new());
-    builder.append_data(&mut header, "././@LongLink", name.as_slice()).unwrap();
+    builder
+        .append_data(&mut header, "././@LongLink", name.as_slice())
+        .unwrap();
     let mut bytes = builder.into_inner().unwrap();
     bytes.truncate(1024); // one header and one padded payload, before end markers
     bytes.extend(original);

@@ -7,6 +7,56 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 
+pub(super) fn render_download(frame: &mut Frame, app: &App, pointer: &mut Pointer) {
+    let area = super::panels::panel_area(frame.area(), 78, 12);
+    frame.render_widget(Clear, area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title(" Dictionary download ")
+        .style(app.theme.surface())
+        .border_style(app.theme.focused_border());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let mut lines: Vec<Line<'_>> = app
+        .download
+        .message
+        .lines()
+        .map(|line| Line::styled(line, app.theme.body()))
+        .collect();
+    if app.download.total > 0 {
+        lines.push(Line::styled(
+            format!(
+                "{:.1} / {:.1} MiB · {}%",
+                app.download.downloaded as f64 / 1048576.0,
+                app.download.total as f64 / 1048576.0,
+                app.download.downloaded.saturating_mul(100) / app.download.total
+            ),
+            app.theme.heading(),
+        ));
+    }
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(2),
+        ),
+    );
+    let button = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
+    pointer.download_button = Region::from(button);
+    frame.render_widget(
+        Paragraph::new(if app.download.running {
+            "Esc cancel · Ctrl+C quit"
+        } else {
+            "Enter / Esc return to Settings"
+        })
+        .style(app.theme.heading()),
+        button,
+    );
+}
+
 pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Pointer) {
     let screen = frame.area();
     let width = screen.width.min(68);
@@ -22,9 +72,9 @@ pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Poin
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(if app.theme.color {
-            " Appearance & Reading · Esc closes "
+            " Settings · Esc closes "
         } else {
-            " Appearance · no color "
+            " Settings · no color "
         })
         .style(app.theme.surface())
         .border_style(app.theme.focused_border());
@@ -69,8 +119,9 @@ pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Poin
             "Pronunciation (IPA): {}",
             if app.view.expand_ipa { "full" } else { "short" }
         ),
+        "Download / update dictionary…".to_string(),
     ];
-    let list_height = inner.height.saturating_sub(3).clamp(1, 6);
+    let list_height = inner.height.saturating_sub(3).clamp(1, 7);
     let offset = app
         .view
         .appearance_row
@@ -127,8 +178,12 @@ pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Poin
         2,
     );
     frame.render_widget(
-        Paragraph::new("↑/↓ select · ←/→ change\nSpace change · Enter close")
-            .style(app.theme.dim()),
+        Paragraph::new(if app.view.appearance_row == 6 {
+            "Enter / Space download\nEsc close"
+        } else {
+            "↑/↓ select · ←/→ change\nSpace change · Enter close"
+        })
+        .style(app.theme.dim()),
         help,
     );
 }

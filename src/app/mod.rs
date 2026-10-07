@@ -41,6 +41,10 @@ struct Location {
 }
 
 pub struct App {
+    pub(crate) download_enabled: bool,
+    pub(crate) download_requested: bool,
+    pub(crate) download_cancelled: bool,
+    pub(crate) download: view::DownloadView,
     pub input: String,
     pub cursor: usize,
     pub results: Vec<Candidate>,
@@ -77,6 +81,10 @@ impl App {
         let lexicon = dictionary.lexicon();
         let (request, response) = worker::spawn(dictionary);
         let mut app = Self {
+            download_enabled: false,
+            download_requested: false,
+            download_cancelled: false,
+            download: view::DownloadView::default(),
             input: query.into(),
             cursor: query.len(),
             results: vec![],
@@ -157,6 +165,22 @@ impl App {
             5 => self.view.expand_ipa = !self.view.expand_ipa,
             _ => {}
         }
+    }
+
+    pub(crate) fn start_download(&mut self) {
+        self.view.overlay = Overlay::Download;
+        self.download_cancelled = false;
+        self.download = view::DownloadView {
+            message: if self.download_enabled {
+                "Preparing download…"
+            } else {
+                "Downloads are available in the Wordglide terminal session"
+            }
+            .into(),
+            running: self.download_enabled,
+            ..Default::default()
+        };
+        self.download_requested = self.download_enabled;
     }
 
     /// Render without color; equivalent to `set_color(false)`.

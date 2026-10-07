@@ -64,7 +64,7 @@ fn help_lines(theme: Theme, focus: Focus) -> Vec<Line<'static>> {
         heading("Other"),
         body("  Ctrl+Z back · Ctrl+Y forward · Ctrl+C quit · ? or F1 this help"),
         body("  Ctrl+G / F3 actions · Ctrl+R session navigation"),
-        body("  F2 appearance: theme, background, Truecolor (auto-saved)"),
+        body("  F2 Settings: appearance, reading, dictionary download"),
     ];
     if focus == Focus::Definition {
         let start = lines

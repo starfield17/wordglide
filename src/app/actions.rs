@@ -270,11 +270,24 @@ impl App {
     pub(crate) fn panel_key(&mut self, key: KeyEvent) {
         match self.view.overlay {
             Overlay::Appearance => match key.code {
+                KeyCode::Enter | KeyCode::Char(' ') if self.view.appearance_row == 6 => {
+                    self.start_download()
+                }
                 KeyCode::Esc | KeyCode::Enter => self.view.overlay = Overlay::None,
-                KeyCode::Up => self.view.appearance_row = (self.view.appearance_row + 5) % 6,
-                KeyCode::Down => self.view.appearance_row = (self.view.appearance_row + 1) % 6,
+                KeyCode::Up => self.view.appearance_row = (self.view.appearance_row + 6) % 7,
+                KeyCode::Down => self.view.appearance_row = (self.view.appearance_row + 1) % 7,
                 KeyCode::Left => self.change_appearance(true),
                 KeyCode::Right | KeyCode::Char(' ') => self.change_appearance(false),
+                _ => {}
+            },
+            Overlay::Download => match key.code {
+                KeyCode::Esc if self.download.running => {
+                    self.download_cancelled = true;
+                    self.download.message = "Cancelling download…".into();
+                }
+                KeyCode::Esc | KeyCode::Enter if !self.download.running => {
+                    self.view.overlay = Overlay::Appearance
+                }
                 _ => {}
             },
             Overlay::Help => match key.code {

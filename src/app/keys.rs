@@ -62,6 +62,10 @@ impl App {
             self.execute_action(Action::Layout);
             return;
         }
+        if self.view.overlay == Overlay::Download {
+            self.panel_key(key);
+            return;
+        }
         if !self.view.modal()
             && key.code == KeyCode::Char('r')
             && key.modifiers.contains(KeyModifiers::CONTROL)

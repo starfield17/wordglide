@@ -67,7 +67,8 @@ pub(super) struct Pointer {
     pub(super) candidates_offset: usize,
     pub(super) candidates_len: usize,
     rows: Vec<HitRow>,
-    pub(super) appearance_rows: [Region; 6],
+    pub(super) appearance_rows: [Region; 7],
+    pub(super) download_button: Region,
 }
 
 impl Pointer {
@@ -83,7 +84,8 @@ impl Pointer {
         self.candidates_offset = 0;
         self.candidates_len = 0;
         self.rows.clear();
-        self.appearance_rows = [Region::default(); 6];
+        self.appearance_rows = [Region::default(); 7];
+        self.download_button = Region::default();
     }
 
     pub(super) fn record_rows(&mut self, inner: Rect, visible: &[&ReadingLine]) {
@@ -134,11 +136,25 @@ impl Pointer {
 /// visible state changed. Motion and drag are ignored so `?1003h` traffic never
 /// forces a redraw.
 pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
+    if app.view.overlay == Overlay::Download {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && pointer.download_button.contains(mouse.column, mouse.row)
+        {
+            if app.download.running {
+                app.download_cancelled = true;
+                app.download.message = "Cancelling download…".into();
+            } else {
+                app.view.overlay = Overlay::Appearance;
+            }
+            return true;
+        }
+        return false;
+    }
     if app.view.show_appearance() {
         match mouse.kind {
-            MouseEventKind::ScrollUp => app.view.appearance_row = (app.view.appearance_row + 5) % 6,
+            MouseEventKind::ScrollUp => app.view.appearance_row = (app.view.appearance_row + 6) % 7,
             MouseEventKind::ScrollDown => {
-                app.view.appearance_row = (app.view.appearance_row + 1) % 6
+                app.view.appearance_row = (app.view.appearance_row + 1) % 7
             }
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(index) = pointer
@@ -147,7 +163,11 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
                     .position(|row| row.contains(mouse.column, mouse.row))
                 {
                     app.view.appearance_row = index;
-                    app.change_appearance(false);
+                    if index == 6 {
+                        app.start_download();
+                    } else {
+                        app.change_appearance(false);
+                    }
                 } else {
                     return false;
                 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1
+
+- First crates.io release; install with `cargo install wordglide --locked`.
+- Explicit `wordglide --download-data` installs the latest prepared dictionary
+  with progress, SHA-256 and file verification, safe extraction, and atomic
+  activation. Ordinary startup and lookup remain offline.
+- F2 Settings adds dictionary download/update with cancellation and retry.
+  The current session retains its dictionary and reading state; restart to use
+  the downloaded version. Existing `--data` and `WORDGLIDE_DATA` overrides win.
+- Managed installations reuse an unchanged archive and retain older packs.
+  Failed and cancelled installations preserve the previous active dictionary.
+- Rust 1.88 compatibility verified; the crate excludes full dictionary assets
+  and maintainer-only scripts while including the 89-word example.
+
+Schema 2 packs remain compatible. Compression and selective runtime
+unpacking remain a TODO; this release does not change dictionary storage.
+
 ## 0.3.0
 
 - Searchable action menu (`Ctrl+G` / `F3`) with shortcuts, current settings,

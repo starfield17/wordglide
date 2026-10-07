@@ -3,8 +3,8 @@ use clap::Parser;
 use directories::ProjectDirs;
 use std::path::{Path, PathBuf};
 use wordglide::{
-    AppearanceOverrides, Dictionary, PackInfo, RunOptions, ThemePreset, pack_info,
-    run_with_options, verify_pack,
+    AppearanceOverrides, Dictionary, PackInfo, RunOptions, ThemePreset, download_data_with_cancel,
+    downloaded_data_path, pack_info, run_with_options, verify_pack,
 };
 
 #[derive(Parser)]
@@ -18,6 +18,9 @@ struct Args {
     /// Directory containing manifest.json and the prepared data files.
     #[arg(long)]
     data: Option<PathBuf>,
+    /// Download and verify the latest prepared dictionary, then exit.
+    #[arg(long, conflicts_with_all = ["query", "data", "info", "verify_data"])]
+    download_data: bool,
     /// Verify all data checksums, indexes, and database integrity, then exit.
     #[arg(long, conflicts_with = "query")]
     verify_data: bool,
@@ -43,13 +46,26 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+    if args.download_data {
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // CLI owns the process-lifetime handler, including when output is redirected.
+        signal_hook::flag::register(signal_hook::consts::SIGINT, std::sync::Arc::clone(&cancel))?;
+        download_data_with_cancel(cancel)?;
+        return Ok(());
+    }
     let executable = std::env::current_exe().context("Cannot locate executable")?;
     let project_dirs = ProjectDirs::from("org", "wordglide", "dict");
     let user_data = project_dirs.as_ref().map(|d| d.data_dir().join("english"));
     let env_data = std::env::var_os("WORDGLIDE_DATA")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
-    let path = resolve_data(args.data, env_data, &executable, user_data)?;
+    let path = resolve_with_download(
+        args.data,
+        env_data,
+        &executable,
+        user_data,
+        downloaded_data_path,
+    )?;
     if args.info {
         print_pack_info(&path, &pack_info(&path)?);
         return Ok(());
@@ -63,7 +79,8 @@ fn main() -> Result<()> {
         );
         return Ok(());
     }
-    let dict = Dictionary::open(&path)?;
+    let dict = Dictionary::open(&path).with_context(|| format!(
+        "Cannot open dictionary at {}. Run `wordglide --download-data`, or select a prepared pack with --data / WORDGLIDE_DATA", path.display()))?;
     let color = color_enabled(args.no_color);
     run_with_options(
         dict,
@@ -127,8 +144,24 @@ fn resolve_data(
         }
     }
     user_data.context(
-        "Cannot determine data directory; set WORDGLIDE_DATA, pass --data DIRECTORY, or use a downloaded with-data bundle",
+        "Cannot determine data directory; run `wordglide --download-data`, set WORDGLIDE_DATA, or pass --data DIRECTORY",
     )
+}
+
+fn resolve_with_download(
+    explicit: Option<PathBuf>,
+    env_data: Option<PathBuf>,
+    executable: &Path,
+    user_data: Option<PathBuf>,
+    managed: impl FnOnce() -> Result<Option<PathBuf>>,
+) -> Result<PathBuf> {
+    if explicit.is_some() || env_data.is_some() {
+        return resolve_data(explicit, env_data, executable, user_data);
+    }
+    if let Some(path) = managed()? {
+        return Ok(path);
+    }
+    resolve_data(None, None, executable, user_data)
 }
 
 #[cfg(test)]
@@ -211,10 +244,27 @@ mod tests {
         fs::write(&executable, "fixture").unwrap();
         fs::create_dir(root.path().join("english-pack")).unwrap();
         let managed = root.path().join("managed");
-        assert_eq!(resolve_with_download(None, None, &executable, None, || Ok(Some(managed.clone()))).unwrap(), managed);
-        for (explicit, environment) in [(Some(managed.clone()), None), (None, Some(managed.clone()))] {
-            assert_eq!(resolve_with_download(explicit, environment, &executable, None, || anyhow::bail!("invalid receipt")).unwrap(), managed);
+        assert_eq!(
+            resolve_with_download(None, None, &executable, None, || Ok(Some(managed.clone())))
+                .unwrap(),
+            managed
+        );
+        for (explicit, environment) in
+            [(Some(managed.clone()), None), (None, Some(managed.clone()))]
+        {
+            assert_eq!(
+                resolve_with_download(explicit, environment, &executable, None, || anyhow::bail!(
+                    "invalid receipt"
+                ))
+                .unwrap(),
+                managed
+            );
         }
-        assert!(resolve_with_download(None, None, &executable, None, || anyhow::bail!("invalid receipt")).is_err());
+        assert!(
+            resolve_with_download(None, None, &executable, None, || anyhow::bail!(
+                "invalid receipt"
+            ))
+            .is_err()
+        );
     }
 }

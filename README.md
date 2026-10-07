@@ -44,11 +44,41 @@ the resulting `wordglide/` directory. `english-pack/` must sit beside the
 `wordglide` executable. Verify downloads using the release's `SHA256SUMS.txt`.
 Linux executables use static musl linking; macOS executables use system libraries.
 
+## Install from crates.io
+
+Requires Rust 1.88 or newer and a C compiler for bundled SQLite:
+
+```sh
+cargo install wordglide --locked
+wordglide --download-data
+wordglide
+```
+
+The crate contains the program and a small build example. The full dictionary is
+installed separately. `--download-data` explicitly contacts GitHub Releases,
+streams the archive, checks SHA-256 and the pack files, and atomically activates
+the verified pack. Esc cancels an interactive download. Normal startup and
+lookups stay offline; missing data prints the download command.
+
+**F2 Settings → Download / update dictionary…** performs the same operation with
+progress and cancellation. The current session keeps its open dictionary,
+query, history, and reading position. Restart to use the newly installed pack.
+Updates happen only when requested. A valid installation of the same archive is
+reused. Failed or cancelled installations keep the previous dictionary.
+
+Downloads live in the platform user-data directory under `downloads/packs`,
+with `downloads/current.json` selecting an immutable pack. Linux uses
+`$XDG_DATA_HOME/dict` (or `~/.local/share/dict`); macOS uses
+`~/Library/Application Support/org.wordglide.dict`. Older installed versions are
+retained; allow roughly 190 MiB for the download and 1.14 GiB for each unpacked
+full dictionary. The data's attribution and licenses ship in its `THIRD_PARTY.md`.
+The program is MIT licensed; the dictionary keeps its separate source licenses.
+
 ## Build and try the real-data sample
 
 Requires a Rust toolchain and a C toolchain for bundled SQLite. The project pins
-Rust 1.99.0 for reproducible development and CI; package MSRV is 1.88, but that
-older version has not been separately verified. Supported environments are
+Rust 1.99.0 for reproducible development and CI; package MSRV is 1.88,
+verified with the packaged source and tests. Supported environments are
 macOS and Linux terminals; Windows is out of scope for now.
 
 ```sh
@@ -67,12 +97,13 @@ are never overwritten: choose a new name when rebuilding.
 
 You can start with a query: `wordglide "take off" --data data/sample-pack`.
 `--data` points to an unpacked pack directory. Without it, the application checks
-`WORDGLIDE_DATA` (when set to a non-empty path), then looks for `english-pack/`
-beside the actual executable, including when launched through a symlink or from
-another working directory. It then checks the existing platform user-data
-directory under `dict/english`. An explicitly selected or adjacent damaged pack
-fails structural validation instead of silently switching dictionaries. Copy an entire pack
-to either location, or keep using `--data`. The application never downloads data.
+`WORDGLIDE_DATA` (when set to a non-empty path), then the explicitly downloaded
+pack, then `english-pack/` beside the actual executable (also through a symlink),
+and finally the existing user-data directory under `dict/english`.
+A selected damaged pack fails validation instead of silently switching
+dictionaries. `--data` and `WORDGLIDE_DATA` continue to override downloaded packs.
+Use `wordglide --download-data` to install data, or select an existing pack with
+`--data`.
 
 Add `--no-color` (or set `NO_COLOR`) for a color-free rendering, and `--no-mouse`
 to keep native terminal text selection.
@@ -114,13 +145,14 @@ its sense. **Ctrl+R** searches this session's existing back/forward locations;
 Enter or a click restores the query, candidate, focus, and reading position.
 It does not save your queries or add a log of everything you type.
 
-## Themes and appearance
+## Settings and appearance
 
-Press **F2** from either pane to open appearance and reading settings. Use ↑/↓ to choose a
+Press **F2** from either pane to open Settings. Use ↑/↓ to choose a
 setting and ←/→ or Space to change it; clicking a setting changes it, and the
 wheel selects a setting. Changes apply immediately and save automatically.
 Layout, examples/references, and IPA preferences also save automatically, including
-changes made with F4, e, and p. Esc, Enter, or F2 closes the panel and keeps your choices. Lookup, selection,
+changes made with F4, e, and p. Esc or F2 closes the panel and keeps your choices. Enter closes a preference row;
+on the download row, Enter or Space starts the download. Lookup, selection,
 reading position, and navigation history are preserved.
 
 Five built-in palettes are available: `default` (terminal colors with cyan

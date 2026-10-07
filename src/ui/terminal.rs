@@ -11,6 +11,97 @@ use std::{fmt, io, path::PathBuf, time::Duration};
 
 use super::pointer::{Pointer, on_mouse};
 use super::render;
+use crate::download::{Progress, Task};
+use std::io::{IsTerminal, Write};
+
+/// Download, verify, and install the latest published dictionary in the user data directory.
+/// Progress is printed to stderr. This never generates or rebuilds dictionary data.
+pub fn download_data() -> Result<PathBuf> {
+    download_data_with_cancel(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        false,
+    )))
+}
+
+/// Install with cooperative cancellation. Set `cancel` to true to cancel the operation.
+/// The caller owns process signal handling; this function does not install signal handlers.
+pub fn download_data_with_cancel(
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<PathBuf> {
+    struct RawGuard(bool);
+    impl Drop for RawGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                let _ = disable_raw_mode();
+            }
+        }
+    }
+    let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
+    let task = Task::start_with_cancel(cancel)?;
+    if interactive {
+        enable_raw_mode()?;
+    }
+    let guard = RawGuard(interactive);
+    let mut message = String::new();
+    let mut last_draw = std::time::Instant::now();
+    loop {
+        for update in task.poll() {
+            match update {
+                Progress::Info(text) => {
+                    message = text;
+                    if !interactive {
+                        eprintln!("{message}");
+                    }
+                }
+                Progress::Bytes { downloaded, total } => {
+                    message = format!(
+                        "Downloading: {:.1} / {:.1} MiB · {}%",
+                        downloaded as f64 / 1048576.0,
+                        total as f64 / 1048576.0,
+                        downloaded.saturating_mul(100) / total.max(1)
+                    );
+                }
+                Progress::Finished(result) => {
+                    drop(guard);
+                    if interactive {
+                        eprint!("\r\x1b[2K");
+                    }
+                    let installed = result.map_err(anyhow::Error::msg)?;
+                    eprintln!(
+                        "{} · snapshot {}\nInstalled at {}\nRun wordglide to open the dictionary.",
+                        if installed.already_current {
+                            "Dictionary is already up to date"
+                        } else {
+                            "Dictionary installed"
+                        },
+                        installed.snapshot,
+                        installed.path.display()
+                    );
+                    return Ok(installed.path);
+                }
+            }
+        }
+        if interactive {
+            if last_draw.elapsed() >= Duration::from_millis(100) {
+                eprint!("\r\x1b[2K{message} · Esc / Ctrl+C cancel");
+                io::stderr().flush()?;
+                last_draw = std::time::Instant::now();
+            }
+            if event::poll(Duration::from_millis(50))?
+                && let Event::Key(key) = event::read()?
+                && (key.code == crossterm::event::KeyCode::Esc
+                    || (key.code == crossterm::event::KeyCode::Char('c')
+                        && key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL)))
+            {
+                task.cancel();
+                message = "Cancelling download…".into();
+            }
+        } else {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
 
 /// Mouse reporting narrowed to button presses and wheel scrolling.
 ///
@@ -93,6 +184,7 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
     let (mut config, appearance) =
         ConfigStore::load(options.config_path.clone(), options.appearance)?;
     let mut app = App::new(dictionary, query);
+    app.download_enabled = crate::download::root().is_ok();
     app.set_color(options.color);
     app.mouse_enabled = options.mouse;
     app.set_appearance(appearance);
@@ -111,6 +203,7 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
         );
         old_hook(info);
     }));
+    let mut download: Option<Task> = None;
     enable_raw_mode()?;
     let _guard = TerminalGuard;
     execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
@@ -121,6 +214,59 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
     let mut pointer = Pointer::default();
     let mut dirty = true;
     while !app.exit {
+        if app.download_requested {
+            app.download_requested = false;
+            match Task::start() {
+                Ok(task) => download = Some(task),
+                Err(error) => {
+                    app.download.message = format!("Download failed: {error:#}");
+                    app.download.running = false;
+                }
+            }
+            dirty = true;
+        }
+        if let Some(task) = &download {
+            if app.download_cancelled {
+                task.cancel();
+            }
+            for update in task.poll() {
+                match update {
+                    Progress::Info(message) => {
+                        if !app.download_cancelled {
+                            app.download.message = message;
+                        }
+                        app.download.total = 0;
+                    }
+                    Progress::Bytes { downloaded, total } => {
+                        app.download.downloaded = downloaded;
+                        app.download.total = total;
+                    }
+                    Progress::Finished(result) => {
+                        app.download.running = false;
+                        app.download.total = 0;
+                        app.download.message = match result {
+                            Ok(installed) => format!(
+                                "{} · snapshot {}\n{}\nRestart Wordglide to use this dictionary. --data and WORDGLIDE_DATA overrides still take precedence.",
+                                if installed.already_current {
+                                    "Already up to date"
+                                } else {
+                                    "Download complete"
+                                },
+                                installed.snapshot,
+                                installed.path.display()
+                            ),
+                            Err(error) => format!(
+                                "{error}\nCurrent dictionary was kept. Return to Settings to retry."
+                            ),
+                        };
+                    }
+                }
+                dirty = true;
+            }
+            if !app.download.running {
+                download = None;
+            }
+        }
         dirty |= app.poll();
         if dirty {
             terminal.draw(|frame| render(frame, &mut app, &mut pointer))?;

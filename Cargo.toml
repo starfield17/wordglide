@@ -1,11 +1,22 @@
 [package]
 name = "wordglide"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
 description = "Offline incremental English dictionary with immediate definition preview"
 default-run = "wordglide"
+repository = "https://github.com/starfield17/wordglide"
+homepage = "https://github.com/starfield17/wordglide"
+readme = "README.md"
+keywords = ["dictionary", "tui", "offline", "english", "wiktionary"]
+categories = ["command-line-utilities"]
+publish = ["crates-io"]
+include = [
+    "Cargo.toml", "Cargo.lock", "src/**/*.rs", "tests/**/*.rs",
+    "examples/sample/*.json", "examples/sample/*.jsonl",
+    "README.md", "LICENSE", "THIRD_PARTY.md", "CHANGELOG.md", "PERFORMANCE.md",
+]
 
 [dependencies]
 anyhow = "1"
@@ -22,8 +33,12 @@ sha2 = "0.10"
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 unicode-width = "0.2"
-
-[dev-dependencies]
+# The idle timeout adapter uses ureq's unversioned transport interface.
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "rustls-webpki-roots"] }
+flate2 = "1"
+tar = "0.4"
+fs2 = "0.4"
+signal-hook = "0.3"
 tempfile = "3"
 
 [[bin]]

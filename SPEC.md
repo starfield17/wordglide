@@ -5,7 +5,7 @@ Done when: type `ho`, see ranked completions and automatic definition preview;
 look up `hosue`, `went`, `better`, and `take off`; follow a word in a definition
 and return to the original query, selection, focus, and scroll position.
 Delivery: Rust `wordglide [QUERY] [--data PACK_DIRECTORY] [--no-color]
-[--no-mouse]`, plus `--info` and `--verify-data`; macOS and Linux
+[--no-mouse]`, plus `--info`, `--verify-data`, and explicit `--download-data`; macOS and Linux
 terminals only. Windows is out of scope for now: no Windows target is built and
 only POSIX terminals are exercised, so do not add Windows-only paths.
 Appearance delivery also accepts `--theme NAME`, `--theme-background=true|false`,
@@ -50,8 +50,24 @@ again. A new lookup or follow clears the forward steps so redo never restores a
 replaced state. History is session-only and capped in both directions.
 Distribution: public Wordglide repository; three download types (program, shared
 data, combined bundle). Explicit --data wins, then a non-empty WORDGLIDE_DATA,
-then adjacent english-pack auto-discovery, then the existing user-data
-directory. Runtime never downloads data.
+then a managed download, then adjacent english-pack auto-discovery, then the
+existing user-data directory. Normal startup and lookups never use the network.
+Explicit --download-data conflicts with query, --data, --info, and --verify-data.
+It fetches metadata once from the fixed public GitHub latest release endpoint,
+then retrieves the archive and SHA256SUMS from that pinned release. Streamed
+SHA-256, five whitelisted regular archive members, file lengths/checksums,
+schema/ranking, and Dictionary::open must pass before atomic activation.
+Installation uses a user-data advisory lock, immutable version directories,
+and an atomic downloads/current.json pointer. Failure/cancellation cleans its
+staging directory and preserves the previous pointer; historical packs remain.
+The same hash and an openable installed pack are reused without downloading.
+F2 Settings includes a Download / update dictionary command, outside the action
+palette. Its modal owns keys, paste, and mouse; Esc cancels and Ctrl+C exits.
+It shows stage, target, byte progress, and success/error with return and retry.
+The CLI owns SIGINT handling; library download APIs use caller-owned cooperative
+cancellation without changing signal handlers. Existing RunOptions stays compatible.
+The lookup worker and active dictionary are untouched. Restart selects the new
+pack unless --data or WORDGLIDE_DATA overrides it.
 Validation: schema 2 only; normal open checks structure and file lengths, plus
 the loaded FST buffer CRC. No default SHA scan, vocabulary traversal, or SQLite
 integrity scan. `wordglide --verify-data [--data DIRECTORY]` performs full
@@ -98,9 +114,10 @@ Appearance: five built-in palettes (`default`, `orange`, `gruvbox_light`,
 `gruvbox_dark_v2`, `whiteout`), the latter four adapted from btop for reading.
 Headword emphasis is separate from POS/IPA; examples and sources use readable
 secondary colors. Panes use rounded borders without changing layout density.
-F2 opens a modal appearance panel from either focus, exclusive with key help.
+F2 opens a modal Settings panel from either focus, exclusive with key help.
 Up/Down or the wheel select a setting; Left/Right, Space, or a row click change
-it immediately. Esc, Enter, and F2 close without reverting. The panel swallows
+preferences immediately. Enter/Space on the download row starts installation;
+Esc and F2 close without reverting, and Enter closes preference rows. The panel swallows
 lookup keys and paste; pending completions wait until overlays close. Query,
 selection, reading position, focus, hints, and session history are preserved.
 `theme_background` and `truecolor` default to true. Background off restores the
@@ -110,7 +127,8 @@ to nearest xterm fixed 256-color cube/grayscale entries; default ANSI colors
 are retained. `--no-color` or non-empty `NO_COLOR` suppresses all explicit
 foreground/background colors while preserving stored appearance preferences.
 Configuration: platform user config directory from ProjectDirs, `config.json`,
-appearance fields `color_theme`, `theme_background`, `truecolor` only.
+appearance fields `color_theme`, `theme_background`, `truecolor`, plus the three
+reading preferences described above.
 Precedence is CLI overrides > saved preferences > defaults. Loading never
 creates a file. Panel changes atomically save only edited fields, preserving
 unknown JSON keys and unrelated CLI overrides. Save failure retains session
@@ -120,7 +138,8 @@ config or an unknown stored theme fails before raw mode and is never overwritten
 belongs to the terminal session, never the dictionary worker or data pack.
 
 ## Do not build
-- N1 No network or LLM dependencies in the runtime.
+- N1 No network during normal startup or lookup, and no LLM dependencies.
+  Only an explicitly requested prebuilt-pack installation uses the network.
 - N2 No personal ranking or persistent lookup history.
 - N3 No audio, images, cloud services, plugins, or multi-dictionary management.
 - N4 No rewriting definitions or inventing examples to fill source gaps.
@@ -132,9 +151,13 @@ belongs to the terminal session, never the dictionary worker or data pack.
 Compile source data to a local pack. Runtime indexes contain compact binary candidate metadata and prebuilt ranking;
 definition text is read only for the selected word and cached within a byte budget.
 Oracle: compare indexed top-k with exhaustive fixed-score ranking in tests.
-Boundary check: compiler privacy/doc test; runtime owns no downloader.
+Boundary check: compiler privacy/doc test; the installer copies verified prebuilt
+bytes and never calls the data generator.
 
 ## Found · Not doing
+- TODO: compressed dictionary storage with selective runtime decompression;
+  evaluate startup, lookup latency, memory, and schema migration before changing
+  the format. Current packs stay fully unpacked.
 - Windows support: no target and no WinAPI terminal paths, until POSIX shells are fully settled.
 - Open source definitions and example coverage do not equal Oxford editorial quality.
 - Word frequency cannot infer the relative frequency of senses within a word.

@@ -6,7 +6,7 @@ mod pointer;
 mod reading;
 mod terminal;
 
-pub use terminal::{RunOptions, run, run_with_options};
+pub use terminal::{RunOptions, download_data, download_data_with_cancel, run, run_with_options};
 
 use crate::{App, Focus, ReadingLayout, app::Overlay};
 #[cfg(test)]
@@ -139,5 +139,8 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
     }
     if app.view.show_appearance() {
         appearance::render_appearance(frame, app, pointer);
+    }
+    if app.view.overlay == Overlay::Download {
+        appearance::render_download(frame, app, pointer);
     }
 }

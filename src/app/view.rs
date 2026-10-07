@@ -21,6 +21,15 @@ pub(crate) enum Overlay {
     Outline,
     History,
     Find,
+    Download,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DownloadView {
+    pub(crate) message: String,
+    pub(crate) downloaded: u64,
+    pub(crate) total: u64,
+    pub(crate) running: bool,
 }
 
 impl ViewOptions {
