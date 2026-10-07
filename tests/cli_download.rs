@@ -29,3 +29,10 @@ fn missing_data_explains_the_explicit_download_command() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("wordglide --download-data"));
 }
+
+#[test]
+fn public_download_can_be_cancelled_before_network_or_file_operations() {
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let error = wordglide::download_data_with_cancel(cancel).unwrap_err();
+    assert!(error.to_string().contains("Download cancelled"));
+}
