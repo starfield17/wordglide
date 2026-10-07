@@ -9,6 +9,34 @@ candidate's definition. Enter is never needed to search.
 Definitions and examples come from Wiktionary, not an LLM. Open data has uneven
 example coverage and is not equivalent to Oxford's learner-oriented editing.
 
+## Features
+
+- **Offline English–English lookup.** The full pack contains about 1.35 million
+  Wiktionary entries, with source definitions, examples, and IPA text where
+  available. Ordinary startup and lookup work without a network connection.
+- **Search as you type.** Candidates and the selected definition update while
+  you type, without Enter. A fixed frequency-based ranking helps surface common
+  words. See [ranking and storage](#ranking-and-storage).
+- **Completion, word forms, and spelling help.** Accept an inline suggestion or
+  use Tab to complete and cycle candidates. Look up forms such as `went`, phrases
+  such as `take off`, and one-edit misspellings such as `hosue`. See [keys](#keys).
+- **Follow words and return to your place.** Use keyboard hints or mouse clicks
+  to look up words within a definition. Session back/forward navigation restores
+  the query, selection, focus, and reading position. See [navigation keys](#keys).
+- **Read long entries comfortably.** Switch between split and focused reading,
+  find text in the displayed definition, jump through its outline, and expand
+  examples, references, or IPA. See [reading long entries](#reading-long-entries).
+- **Make the terminal comfortable.** Five themes, saved reading preferences,
+  truecolor and 256-color support, a no-color mode, searchable actions, keyboard
+  help, mouse controls, and grapheme-aware editing. See [Settings and
+  appearance](#settings-and-appearance) and [finding actions](#finding-actions).
+- **Install easily and update when you choose.** Use a [ready-to-run
+  bundle](#download-and-run) or [install with cargo](#install-from-cratesio).
+  Download data explicitly with `wordglide --download-data` or F2 Settings;
+  downloads require a network connection and are verified before atomic
+  installation. The running session keeps its existing dictionary and reading
+  position; restart to use an update.
+
 ## Download and run
 
 Download the **with-data** archive matching your platform from
@@ -283,10 +311,10 @@ data and code licenses.
 | Ctrl+J / Ctrl+K in definition | Scroll one line down / up |
 | F4 | Toggle split / focused reading |
 | Ctrl+R | Search session back/forward locations |
-| `F2` | Appearance and reading settings; changes save automatically |
+| `F2` | Settings: appearance, reading preferences, and dictionary download/update |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |
-| Click a candidate | Select it and preview it, keeping input focus |
+| Click a candidate | Select it and preview it without changing focus |
 | Click the highlighted candidate again | Accept it and focus the definition |
 | Click in the input box | Focus input and place the cursor at the clicked grapheme |
 | Esc | Undo active completion, cancel hints, or return input focus |
@@ -325,7 +353,8 @@ usable size is 30×10.
 
 Mouse works in two steps: the first click inside the definition pane focuses it,
 and clicking a visible word there follows it like a hint. Clicking the input box
-returns focus without moving the cursor, and the wheel scrolls the definition
+returns focus and places the cursor at the clicked grapheme; clicks on a
+prediction place it at the end of the real input. The wheel scrolls the definition
 from any focus. A click on a candidate selects and previews it without moving
 the focus; clicking the highlighted candidate again accepts it, like Enter.
 Only words present in the local pack respond, and the jump
