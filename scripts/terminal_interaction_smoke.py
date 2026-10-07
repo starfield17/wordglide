@@ -84,8 +84,12 @@ def main():
             for enabled in [False, True]:
                 session.output.clear()
                 session.send(b"\x07")  # Ctrl+G
+                session.wait(lambda: b"Actions" in session.output, "action menu")
+                session.drain(0.1)
                 paste(session, "mouse")
-                session.wait(lambda: b"Mouse capture" in session.output, "filtered action")
+                # Differential rendering can reuse letters from the previous
+                # row; verify the entered filter, then the actual terminal mode.
+                session.wait(lambda: b"mouse" in session.output, "action filter input")
                 session.send(b"\r")
                 sequence = b"\x1b[?1006h" if enabled else b"\x1b[?1006l"
                 session.wait(lambda: sequence in session.output, "mouse capture toggle")
