@@ -7,9 +7,10 @@ use std::{
     thread,
 };
 
+type Routes = Arc<Mutex<HashMap<String, (u16, Vec<u8>, Duration)>>>;
 struct Server {
     source: Source,
-    routes: Arc<Mutex<HashMap<String, (u16, Vec<u8>, Duration)>>>,
+    routes: Routes,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
