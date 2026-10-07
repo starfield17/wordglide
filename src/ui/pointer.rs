@@ -58,6 +58,7 @@ struct HitRow {
 pub(super) struct Pointer {
     pub(super) input: Region,
     pub(super) panel: Region,
+    pub(super) navigation_rows: Vec<(Region, usize)>,
     pub(super) command_rows: Vec<(Region, Action, usize)>,
     pub(super) footer: Vec<(Region, Action)>,
     pub(super) definition: Region,
@@ -73,6 +74,7 @@ impl Pointer {
         self.input = Region::default();
         self.panel = Region::default();
         self.command_rows.clear();
+        self.navigation_rows.clear();
         self.footer.clear();
         self.definition = Region::default();
         self.candidates = Region::default();
@@ -184,6 +186,41 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
                     return false;
                 }
             }
+            _ => return false,
+        }
+        return true;
+    }
+    if matches!(app.view.overlay, Overlay::Outline | Overlay::History) {
+        let count = if app.view.overlay == Overlay::Outline {
+            app.reading.sections.len()
+        } else {
+            app.navigation_locations().len()
+        };
+        match mouse.kind {
+            MouseEventKind::ScrollUp => app.view.panel_row = app.view.panel_row.saturating_sub(1),
+            MouseEventKind::ScrollDown => {
+                app.view.panel_row = (app.view.panel_row + 1).min(count.saturating_sub(1))
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some((_, index)) = pointer
+                    .navigation_rows
+                    .iter()
+                    .find(|(region, _)| region.contains(mouse.column, mouse.row))
+                {
+                    app.view.panel_row = *index;
+                    app.accept_panel_row();
+                } else {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+        return true;
+    }
+    if app.view.overlay == Overlay::Find {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => app.next_match(true),
+            MouseEventKind::ScrollDown => app.next_match(false),
             _ => return false,
         }
         return true;

@@ -52,6 +52,8 @@ fn help_lines(theme: Theme) -> Vec<Line<'static>> {
         body("  f follow a visible word (type the two hint letters)"),
         body("  e examples and references: compact / full"),
         body("  p pronunciation (IPA): short / full"),
+        body("  Ctrl+J/K scroll one line · [/] previous/next group"),
+        body("  / find text · n/N next/previous match · o outline · F4 reading focus"),
         heading("Input editing"),
         body("  Ctrl+W or Alt+Backspace delete word · Ctrl+K kill to end"),
         body("  Ctrl+←/→ word motion · Alt+←/→ history back / forward"),
@@ -61,7 +63,7 @@ fn help_lines(theme: Theme) -> Vec<Line<'static>> {
         body("  Click a candidate to preview; click it again to accept"),
         heading("Other"),
         body("  Ctrl+Z back · Ctrl+Y forward · Ctrl+C quit · ? or F1 this help"),
-        body("  Ctrl+G / F3 actions · search all available operations"),
+        body("  Ctrl+G / F3 actions · Ctrl+R session navigation"),
         body("  F2 appearance: theme, background, Truecolor (auto-saved)"),
     ]
 }

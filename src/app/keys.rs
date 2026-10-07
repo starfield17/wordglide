@@ -57,6 +57,17 @@ impl App {
             self.exit = true;
             return;
         }
+        if !self.view.modal() && key.code == KeyCode::F(4) {
+            self.execute_action(Action::Layout);
+            return;
+        }
+        if !self.view.modal()
+            && key.code == KeyCode::Char('r')
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.execute_action(Action::Navigation);
+            return;
+        }
         let panel = match key.code {
             KeyCode::F(1) => Some(Overlay::Help),
             KeyCode::F(2) => Some(Overlay::Appearance),
@@ -104,6 +115,12 @@ impl App {
                     self.input.drain(previous..self.cursor);
                     self.cursor = previous;
                     self.search();
+                }
+                KeyCode::Char('j') if self.focus == Focus::Definition => {
+                    self.scroll_by(1);
+                }
+                KeyCode::Char('k') if self.focus == Focus::Definition => {
+                    self.scroll_by(-1);
                 }
                 KeyCode::Char('k') if self.focus == Focus::Input => {
                     self.input.truncate(self.cursor);
@@ -206,6 +223,16 @@ impl App {
                     self.focus = Focus::Input;
                 }
             }
+            KeyCode::Char('/') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Find)
+            }
+            KeyCode::Char('o') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Outline)
+            }
+            KeyCode::Char('n') if self.focus == Focus::Definition => self.next_match(false),
+            KeyCode::Char('N') if self.focus == Focus::Definition => self.next_match(true),
+            KeyCode::Char('[') if self.focus == Focus::Definition => self.move_section(true),
+            KeyCode::Char(']') if self.focus == Focus::Definition => self.move_section(false),
             KeyCode::Char('f') if self.focus == Focus::Definition && self.preview.is_some() => {
                 self.picking = true;
                 self.label_input.clear();
@@ -262,7 +289,10 @@ impl App {
 
     pub fn paste(&mut self, text: &str) {
         if self.view.modal() {
-            if self.view.overlay == Overlay::Commands {
+            if matches!(
+                self.view.overlay,
+                Overlay::Commands | Overlay::History | Overlay::Find
+            ) {
                 self.panel_paste(text);
             }
             return;

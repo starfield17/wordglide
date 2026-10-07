@@ -20,7 +20,7 @@ mod store;
 mod theme;
 mod ui;
 
-pub use app::{App, Focus};
+pub use app::{App, Focus, ReadingLayout, ReadingPreferences};
 pub use build::build_pack;
 pub use model::{Candidate, Entry, Example, Group, MatchKind, Preview, Sense};
 pub use normalize::normalize;

@@ -8,7 +8,7 @@ mod terminal;
 
 pub use terminal::{RunOptions, run, run_with_options};
 
-use crate::{App, Focus, app::Overlay};
+use crate::{App, Focus, ReadingLayout, app::Overlay};
 #[cfg(test)]
 use help::footer_help;
 use help::{render_footer, render_help};
@@ -83,7 +83,14 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
             rows[0].y + 1,
         ));
     }
-    let panes = if area.width >= 80 {
+    let focused = app.focus == Focus::Definition
+        && app.reading_preferences().reading_layout == ReadingLayout::Focus;
+    let panes = if focused {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Length(0), Constraint::Min(1)])
+            .split(rows[1])
+    } else if area.width >= 80 {
         let width = ((area.width as usize * 24) / 100).clamp(20, 36) as u16;
         Layout::default()
             .direction(Direction::Horizontal)
@@ -101,11 +108,19 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
             .split(rows[1])
     };
     pointer.definition = Region::from(panes[1]);
-    render_candidates(frame, app, panes[0], pointer);
+    if !focused {
+        render_candidates(frame, app, panes[0], pointer);
+    }
     render_definition(frame, app, panes[1], pointer);
     render_footer(frame, app, rows[2], pointer);
     if app.view.show_help() {
         render_help(frame, app);
+    }
+    if matches!(
+        app.view.overlay,
+        Overlay::Outline | Overlay::History | Overlay::Find
+    ) {
+        panels::render_reading_panel(frame, app, pointer);
     }
     if app.view.overlay == Overlay::Commands {
         panels::render_commands(frame, app, pointer);

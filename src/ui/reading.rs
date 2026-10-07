@@ -1,4 +1,8 @@
-use crate::{App, Entry, app::ViewOptions, theme::Theme};
+use crate::{
+    App,
+    app::{LogicalLine, TextRole, TextRow, document},
+    theme::Theme,
+};
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
@@ -80,96 +84,141 @@ impl ReadingLine {
 // rendering because ratatui performs no hit testing. Kept out of `App` so the
 // application state stays independent of the terminal backend.
 
-fn append_entry(
-    lines: &mut Vec<ReadingLine>,
-    entry: &Entry,
-    related: bool,
-    theme: Theme,
-    view: ViewOptions,
-) {
-    if related {
-        lines.push(ReadingLine {
-            text: format!("→ {}", entry.headword),
-            style: theme.heading(),
-            styles: Vec::new(),
-        });
+fn logical_line(source: &LogicalLine, theme: Theme) -> ReadingLine {
+    let style = match source.role {
+        TextRole::Heading => theme.heading(),
+        TextRole::Body => theme.body(),
+        TextRole::Dim => theme.dim(),
+        TextRole::Example => theme.example(),
+        TextRole::Accent => theme.accent(),
+    };
+    let mut line = ReadingLine::new(source.text.clone(), style);
+    if let Some(start) = source.secondary_start {
+        line.styles.push((start..line.text.len(), theme.dim()));
     }
-    // Partition across groups as well as within each group: historical-only groups come last.
-    for historical in [false, true] {
-        for group in &entry.groups {
-            let senses: Vec<_> = group
-                .senses
-                .iter()
-                .filter(|s| s.historical() == historical)
-                .collect();
-            if senses.is_empty() {
-                continue;
-            }
-            let ipa = if !view.expand_ipa && group.ipa.len() > 2 {
-                format!("{} …", group.ipa[..2].join(" · "))
-            } else {
-                group.ipa.join(" · ")
-            };
-            lines.push(ReadingLine {
-                text: format!(
-                    "{}  {}  {}{}",
-                    group.headword,
-                    group.pos,
-                    ipa,
-                    if historical {
-                        "  [archaic / obsolete]"
-                    } else {
-                        ""
-                    }
-                ),
-                style: theme.heading(),
-                styles: Vec::new(),
-            });
-            if let Some(line) = lines.last_mut() {
-                line.styles
-                    .push((group.headword.len()..line.text.len(), theme.dim()));
-            }
-            for (i, sense) in senses.iter().enumerate() {
-                let tags = if sense.tags.is_empty() {
-                    String::new()
+    line
+}
+
+/// Rebuild source text only when the preview or display preferences change;
+/// reflow only when the document or column width changes. Cached rows contain
+/// no terminal styles, so themes can change without rebuilding text.
+pub(super) fn prepare_reading(app: &mut App, width: usize) {
+    let Some(preview) = app.preview.as_ref() else {
+        return;
+    };
+    let preferences = app.reading_preferences();
+    let same = app.reading.same_preview(preview);
+    let rebuild = !same
+        || preferences.expand_examples != app.reading.preferences.expand_examples
+        || preferences.expand_ipa != app.reading.preferences.expand_ipa;
+    let reflow = rebuild || app.reading.width != width;
+    if !reflow && app.reading.restore_anchor.is_none() {
+        return;
+    }
+    let anchor = app.reading.restore_anchor.take().or_else(|| {
+        if same {
+            app.reading.anchor(app.scroll)
+        } else {
+            None
+        }
+    });
+    if rebuild {
+        let (lines, sections) = document(preview, preferences);
+        app.reading.lines = lines;
+        app.reading.sections = sections;
+        app.reading.preview = Some(preview.clone());
+        app.reading.preferences = preferences;
+        app.reading.update_matches();
+    }
+    if reflow {
+        let mut rows = Vec::new();
+        for (logical, source) in app.reading.lines.iter().enumerate() {
+            let mut from = 0;
+            for line in wrap(
+                vec![ReadingLine::new(source.text.clone(), Style::default())],
+                width,
+            ) {
+                let visible = line.text.trim_start();
+                let prefix = line.text.len() - visible.len();
+                let start = if visible.is_empty() {
+                    from
                 } else {
-                    format!(" [{}]", sense.tags.join(", "))
+                    source.text[from..]
+                        .find(visible)
+                        .map_or(from, |offset| from + offset)
                 };
-                lines.push(ReadingLine {
-                    text: format!("{}. {}{}", i + 1, sense.glosses.join(" › "), tags),
-                    style: theme.body(),
-                    styles: Vec::new(),
-                });
-                if view.expand_examples {
-                    for example in &sense.examples {
-                        lines.push(ReadingLine {
-                            text: format!("   • {}", example.text),
-                            style: theme.example(),
-                            styles: Vec::new(),
-                        });
-                        if !example.reference.is_empty() {
-                            lines.push(ReadingLine {
-                                text: format!("     — {}", example.reference),
-                                style: theme.dim(),
-                                styles: Vec::new(),
-                            });
-                        }
-                    }
-                } else if let Some(example) = sense.examples.first() {
-                    lines.push(ReadingLine {
-                        text: format!("   • {}", example.text),
-                        style: theme.example(),
-                        styles: Vec::new(),
-                    });
-                }
-                lines.push(ReadingLine {
-                    text: String::new(),
-                    style: theme.body(),
-                    styles: Vec::new(),
+                from = (start + visible.len()).min(source.text.len());
+                rows.push(TextRow {
+                    text: line.text,
+                    logical,
+                    start,
+                    prefix,
                 });
             }
         }
+        app.reading.rows = rows;
+        app.reading.width = width;
     }
+    if let Some(anchor) = anchor
+        && let Some(row) = app.reading.row_for_anchor(&anchor)
+    {
+        app.scroll = row;
+    }
+}
+
+pub(super) fn styled_rows(app: &App, range: Range<usize>) -> Vec<ReadingLine> {
+    app.reading
+        .rows
+        .iter()
+        .skip(range.start)
+        .take(range.end.saturating_sub(range.start))
+        .map(|row| {
+            let source = &app.reading.lines[row.logical];
+            let style = match source.role {
+                TextRole::Heading => app.theme.heading(),
+                TextRole::Body => app.theme.body(),
+                TextRole::Dim => app.theme.dim(),
+                TextRole::Example => app.theme.example(),
+                TextRole::Accent => app.theme.accent(),
+            };
+            let mut line = ReadingLine::new(row.text.clone(), style);
+            if let Some(start) = source.secondary_start {
+                let end = row.start + row.text.len().saturating_sub(row.prefix);
+                if start < end {
+                    let mapped = row.prefix + start.saturating_sub(row.start);
+                    line.styles.push((
+                        mapped.min(line.text.len())..line.text.len(),
+                        app.theme.dim(),
+                    ));
+                }
+            }
+            if !app.picking {
+                for found in app
+                    .reading
+                    .matches
+                    .iter()
+                    .filter(|m| m.logical == row.logical)
+                {
+                    let start = found.range.start.max(row.start);
+                    let end = found
+                        .range
+                        .end
+                        .min(row.start + row.text.len().saturating_sub(row.prefix));
+                    if start < end {
+                        line.styles.insert(
+                            0,
+                            (
+                                row.prefix + start - row.start..row.prefix + end - row.start,
+                                app.theme.hint_label(),
+                            ),
+                        );
+                    }
+                }
+            }
+            line.style = style;
+            line
+        })
+        .collect()
 }
 
 fn empty_state(app: &App) -> String {
@@ -220,33 +269,12 @@ pub(super) fn reading_lines(app: &App) -> Vec<ReadingLine> {
         }
         return lines;
     };
-    if !preview.related.is_empty() {
-        let relations = preview
-            .related
+    lines.extend(
+        document(preview, app.reading_preferences())
+            .0
             .iter()
-            .map(|e| e.headword.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(ReadingLine {
-            text: format!("{} → {} (word form)", preview.entry.headword, relations),
-            style: app.theme.accent(),
-            styles: Vec::new(),
-        });
-        for related in &preview.related {
-            append_entry(&mut lines, related, true, app.theme, app.view);
-        }
-        lines.push(ReadingLine {
-            text: format!("Original form: {}", preview.entry.headword),
-            style: app.theme.dim(),
-            styles: Vec::new(),
-        });
-    }
-    append_entry(&mut lines, &preview.entry, false, app.theme, app.view);
-    lines.push(ReadingLine {
-        text: format!("Source: {}", preview.entry.source_url),
-        style: app.theme.dim(),
-        styles: Vec::new(),
-    });
+            .map(|source| logical_line(source, app.theme)),
+    );
     lines
 }
 

@@ -93,6 +93,27 @@ The action menu also toggles mouse capture for the current session, allowing
 native terminal selection without restarting. `--no-mouse` selects its initial
 state. Idle sessions redraw only when input, a result, or the terminal size changes.
 
+## Reading long entries
+
+In reading focus, **/** finds text in the displayed definition. Type or paste a
+literal, case-insensitive query, then Enter to keep it or Esc to restore your
+previous reading position. ↑/↓ in the search prompt moves through matches;
+**n/N** repeats after closing it. Hidden examples and IPA are not searched.
+Changing words clears the search. Follow hints temporarily take precedence over
+search highlighting.
+
+Press **o** for the word / part-of-speech outline, or **[ / ]** for the previous /
+next group. **Ctrl+J/K** scrolls one line down/up; ↑/↓ continues selecting
+candidates. PageUp/PageDown and the wheel retain their existing behavior.
+**F4** toggles split / focused reading. Focused reading hides candidates while
+you read; returning to input shows them again. Lines are at most 96 columns.
+
+Resizing, expanding examples/IPA, and switching layouts retain your current
+source sense where possible. Collapsing an example you were reading returns to
+its sense. **Ctrl+R** searches this session's existing back/forward locations;
+Enter or a click restores the query, candidate, focus, and reading position.
+It does not save your queries or add a log of everything you type.
+
 ## Themes and appearance
 
 Press **F2** from either pane to open appearance settings. Use ↑/↓ to choose a
@@ -207,6 +228,13 @@ data and code licenses.
 | `p` in definition | Pronunciation (IPA): short / full |
 | `?` in definition / `F1` | Show the key help; Esc closes it |
 | Ctrl+G / F3 | Search and run available actions |
+| / in definition | Find displayed text; Enter keeps, Esc restores position |
+| n / N in definition | Next / previous match |
+| o in definition | Jump through the definition outline |
+| [ / ] in definition | Previous / next word or part-of-speech group |
+| Ctrl+J / Ctrl+K in definition | Scroll one line down / up |
+| F4 | Toggle split / focused reading |
+| Ctrl+R | Search session back/forward locations |
 | `F2` | Theme, background, and Truecolor settings; changes save automatically |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |

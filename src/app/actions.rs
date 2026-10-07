@@ -4,6 +4,10 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
+    Find,
+    Outline,
+    Layout,
+    Navigation,
     Commands,
     Complete,
     NewLookup,
@@ -24,13 +28,17 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    pub(crate) const ALL: [Self; 17] = [
+    pub(crate) const ALL: [Self; 21] = [
         Self::Commands,
         Self::Complete,
         Self::NewLookup,
         Self::Focus,
         Self::Accept,
         Self::Prediction,
+        Self::Find,
+        Self::Outline,
+        Self::Layout,
+        Self::Navigation,
         Self::Follow,
         Self::Top,
         Self::Bottom,
@@ -45,6 +53,10 @@ impl Action {
     ];
     pub(crate) fn title(self) -> &'static str {
         match self {
+            Self::Find => "Find text in this definition",
+            Self::Outline => "Definition outline",
+            Self::Layout => "Reading layout: split / focus",
+            Self::Navigation => "Session navigation",
             Self::Commands => "Search actions",
             Self::Complete => "Complete or cycle candidates",
             Self::NewLookup => "New lookup",
@@ -66,6 +78,10 @@ impl Action {
     }
     pub(crate) fn shortcut(self) -> &'static str {
         match self {
+            Self::Find => "/",
+            Self::Outline => "o",
+            Self::Layout => "F4",
+            Self::Navigation => "Ctrl+R",
             Self::Commands => "Ctrl+G",
             Self::Complete => "Tab",
             Self::NewLookup => "Ctrl+U",
@@ -107,6 +123,9 @@ impl App {
             {
                 Some("No ready definition")
             }
+            Action::Navigation if self.history.is_empty() && self.forward.is_empty() => {
+                Some("No navigation locations")
+            }
             Action::Back if self.history.is_empty() => Some("No previous location"),
             Action::Forward if self.forward.is_empty() => Some("No next location"),
             _ => None,
@@ -114,6 +133,13 @@ impl App {
     }
     pub(crate) fn action_state(&self, action: Action) -> &'static str {
         match action {
+            Action::Layout => {
+                if self.view.reading_layout == ReadingLayout::Focus {
+                    "focus"
+                } else {
+                    "split"
+                }
+            }
             Action::Examples => {
                 if self.view.expand_examples {
                     "on"
@@ -154,6 +180,20 @@ impl App {
         }
         self.view.overlay = Overlay::None;
         match action {
+            Action::Find => self.find_start(),
+            Action::Outline => {
+                self.open_panel(Overlay::Outline);
+                self.focus = Focus::Definition;
+            }
+            Action::Navigation => self.open_panel(Overlay::History),
+            Action::Layout => {
+                self.view.reading_layout = if self.view.reading_layout == ReadingLayout::Split {
+                    ReadingLayout::Focus
+                } else {
+                    ReadingLayout::Split
+                };
+                self.focus = Focus::Definition;
+            }
             Action::Commands => self.open_panel(Overlay::Commands),
             Action::Complete => {
                 self.focus = Focus::Input;
@@ -202,6 +242,19 @@ impl App {
                 .take(256usize.saturating_sub(self.panel_query.chars().count())),
         );
         self.view.panel_row = 0;
+        if self.view.overlay == Overlay::Find {
+            self.find_update();
+        }
+    }
+    pub(crate) fn accept_panel_row(&mut self) {
+        if self.view.overlay == Overlay::Outline {
+            if let Some(row) = self.reading.section_row(self.view.panel_row) {
+                self.scroll = row.min(self.max_scroll);
+            }
+        } else if let Some((distance, _)) = self.navigation_locations().get(self.view.panel_row) {
+            self.navigate_distance(*distance);
+        }
+        self.view.overlay = Overlay::None;
     }
     pub(crate) fn panel_key(&mut self, key: KeyEvent) {
         match self.view.overlay {
@@ -247,6 +300,72 @@ impl App {
                     self.panel_query.pop();
                     self.view.panel_row = 0;
                 }
+                KeyCode::Char(c)
+                    if key.modifiers.is_empty()
+                        || key.modifiers == crossterm::event::KeyModifiers::SHIFT =>
+                {
+                    self.panel_paste(&c.to_string())
+                }
+                _ => {}
+            },
+            Overlay::Outline | Overlay::History => {
+                let count = if self.view.overlay == Overlay::Outline {
+                    self.reading.sections.len()
+                } else {
+                    self.navigation_locations().len()
+                };
+                match key.code {
+                    KeyCode::Esc => self.view.overlay = Overlay::None,
+                    KeyCode::Up => self.view.panel_row = self.view.panel_row.saturating_sub(1),
+                    KeyCode::Down => {
+                        self.view.panel_row = (self.view.panel_row + 1).min(count.saturating_sub(1))
+                    }
+                    KeyCode::PageUp => self.view.panel_row = self.view.panel_row.saturating_sub(10),
+                    KeyCode::PageDown => {
+                        self.view.panel_row =
+                            (self.view.panel_row + 10).min(count.saturating_sub(1))
+                    }
+                    KeyCode::Home => self.view.panel_row = 0,
+                    KeyCode::End => self.view.panel_row = count.saturating_sub(1),
+                    KeyCode::Enter => self.accept_panel_row(),
+                    KeyCode::Backspace if self.view.overlay == Overlay::History => {
+                        self.panel_query.pop();
+                        self.view.panel_row = 0;
+                    }
+                    KeyCode::Char(c)
+                        if self.view.overlay == Overlay::History
+                            && (key.modifiers.is_empty()
+                                || key.modifiers == crossterm::event::KeyModifiers::SHIFT) =>
+                    {
+                        self.panel_paste(&c.to_string())
+                    }
+                    _ => {}
+                }
+            }
+            Overlay::Find => match key.code {
+                KeyCode::Esc => {
+                    if let Some((scroll, anchor, find, index)) = self.reading.find_original.take() {
+                        self.scroll = anchor
+                            .as_ref()
+                            .and_then(|a| self.reading.row_for_anchor(a))
+                            .unwrap_or(scroll)
+                            .min(self.max_scroll);
+                        self.reading.find = find;
+                        self.reading.match_index = index;
+                        self.reading.update_matches();
+                    }
+                    self.view.overlay = Overlay::None;
+                }
+                KeyCode::Enter => {
+                    self.reading.find_original = None;
+                    self.view.overlay = Overlay::None;
+                }
+                KeyCode::Backspace => {
+                    self.panel_query.pop();
+                    self.find_update();
+                }
+                KeyCode::Down => self.next_match(false),
+                KeyCode::Up => self.next_match(true),
                 KeyCode::Char(c)
                     if key.modifiers.is_empty()
                         || key.modifiers == crossterm::event::KeyModifiers::SHIFT =>

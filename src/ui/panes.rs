@@ -10,7 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::pointer::{Pointer, Region};
-use super::reading::{label_line, reading_lines, stale_style, wrap};
+use super::reading::{label_line, prepare_reading, reading_lines, stale_style, styled_rows, wrap};
 
 pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Pointer) {
     let items: Vec<_> = app
@@ -102,24 +102,64 @@ pub(super) fn render_definition(
     pointer: &mut Pointer,
 ) {
     let initial_block = Block::default().borders(Borders::ALL);
-    let inner = initial_block.inner(area);
-    // A page keeps one line of overlap so no definition line is skipped.
-    app.page = inner.height.saturating_sub(1).max(1) as usize;
-    let mut content = reading_lines(app);
-    if app.loading && app.preview.is_some() {
-        content = stale_style(content);
+    let mut inner = initial_block.inner(area);
+    if inner.width > 96 {
+        inner.x += (inner.width - 96) / 2;
+        inner.width = 96;
     }
-    let lines = wrap(content, inner.width as usize);
-    app.max_scroll = lines.len().saturating_sub(inner.height as usize);
+    prepare_reading(app, inner.width as usize);
+    let mut body = inner;
+    if app.preview.is_some()
+        && let Some(error) = &app.error
+    {
+        frame.render_widget(
+            Paragraph::new(error.clone()).style(app.theme.error()),
+            ratatui::layout::Rect::new(inner.x, inner.y, inner.width, 1),
+        );
+        body.y += 1;
+        body.height = body.height.saturating_sub(1);
+    }
+    // A page keeps one line of overlap so no definition line is skipped.
+    app.page = body.height.saturating_sub(1).max(1) as usize;
+    let empty = if app.preview.is_none() {
+        wrap(reading_lines(app), body.width as usize)
+    } else {
+        Vec::new()
+    };
+    let count = if app.preview.is_some() {
+        app.reading.rows.len()
+    } else {
+        empty.len()
+    };
+    app.max_scroll = count.saturating_sub(body.height as usize);
     app.scroll = app.scroll.min(app.max_scroll);
+    let mut lines = if app.preview.is_some() {
+        styled_rows(app, app.scroll..app.scroll + body.height as usize)
+    } else {
+        empty
+            .into_iter()
+            .skip(app.scroll)
+            .take(body.height as usize)
+            .collect()
+    };
+    if app.loading && app.preview.is_some() {
+        lines = stale_style(lines);
+    }
 
-    let title = match &app.preview {
+    let mut title = match &app.preview {
         None => " Definition ".to_string(),
         Some(preview) => match scroll_percent(app.scroll, app.max_scroll) {
             None => format!(" Definition · {} ", preview.entry.headword),
             Some(pct) => format!(" Definition · {} · {}% ", preview.entry.headword, pct),
         },
     };
+    if let Some(section) = app
+        .reading
+        .current_section(app.scroll)
+        .and_then(|i| app.reading.sections.get(i))
+    {
+        title = title.trim_end().to_string() + " · " + &section.title + " ";
+    }
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -127,12 +167,8 @@ pub(super) fn render_definition(
         .border_style(app.theme.border(app.focus == Focus::Definition));
     frame.render_widget(block, area);
 
-    let visible: Vec<_> = lines
-        .iter()
-        .skip(app.scroll)
-        .take(inner.height as usize)
-        .collect();
-    pointer.record_rows(inner, &visible);
+    let visible: Vec<_> = lines.iter().collect();
+    pointer.record_rows(body, &visible);
     let mut map = HashMap::new();
     app.labels.clear();
     if app.picking {
@@ -167,5 +203,5 @@ pub(super) fn render_definition(
             }
         })
         .collect();
-    frame.render_widget(Paragraph::new(rendered), inner);
+    frame.render_widget(Paragraph::new(rendered), body);
 }

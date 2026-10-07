@@ -2,6 +2,7 @@ mod actions;
 mod completion;
 mod history;
 mod keys;
+mod reading;
 mod view;
 mod worker;
 
@@ -11,7 +12,10 @@ use std::{collections::VecDeque, sync::mpsc};
 
 pub(crate) use actions::Action;
 use completion::Completion;
+pub(crate) use reading::{Anchor, ReadingState};
+pub(crate) use reading::{LogicalLine, TextRole, TextRow, document};
 pub(crate) use view::{Overlay, ViewOptions};
+pub use view::{ReadingLayout, ReadingPreferences};
 use worker::{Request, Response};
 
 /// Cap on remembered navigation steps in either direction.
@@ -33,6 +37,7 @@ struct Location {
     scroll: usize,
     focus: Focus,
     loading: bool,
+    anchor: Option<Anchor>,
 }
 
 pub struct App {
@@ -54,6 +59,7 @@ pub struct App {
     pub(crate) theme: Theme,
     pub(crate) view: ViewOptions,
     pub(crate) appearance_status: Option<String>,
+    pub(crate) reading: ReadingState,
     pub(crate) panel_query: String,
     pub(crate) mouse_enabled: bool,
     lexicon: Lexicon,
@@ -89,6 +95,7 @@ impl App {
             theme: Theme::colored(),
             view: ViewOptions::default(),
             appearance_status: None,
+            reading: ReadingState::default(),
             panel_query: String::new(),
             mouse_enabled: true,
             lexicon,
@@ -113,6 +120,20 @@ impl App {
     /// File persistence is owned by `run_with_options`, not by `App`.
     pub fn set_appearance(&mut self, appearance: Appearance) {
         self.theme.appearance = appearance;
+    }
+
+    pub fn reading_preferences(&self) -> ReadingPreferences {
+        ReadingPreferences {
+            reading_layout: self.view.reading_layout,
+            expand_examples: self.view.expand_examples,
+            expand_ipa: self.view.expand_ipa,
+        }
+    }
+
+    pub fn set_reading_preferences(&mut self, preferences: ReadingPreferences) {
+        self.view.reading_layout = preferences.reading_layout;
+        self.view.expand_examples = preferences.expand_examples;
+        self.view.expand_ipa = preferences.expand_ipa;
     }
 
     pub fn appearance(&self) -> Appearance {
@@ -163,6 +184,8 @@ impl App {
         self.pending_completion.clear();
         // Any new lookup branches away from the states reached by going back.
         self.forward.clear();
+        self.reading.clear_find();
+        self.reading.restore_anchor = None;
         self.generation += 1;
         self.selected = 0;
         self.scroll = 0;
@@ -295,6 +318,7 @@ impl App {
             scroll: self.scroll,
             focus: self.focus,
             loading: self.loading,
+            anchor: self.reading.anchor(self.scroll),
         }
     }
 }

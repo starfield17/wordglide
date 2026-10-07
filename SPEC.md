@@ -66,6 +66,16 @@ the entry and shows scroll progress. Candidate panes size to their content, and
 a definition retained during loading is dimmed. An error is shown as a banner
 above the last good definition. Existing phrases included. Navigation history
 is session-only and does not affect ranking.
+Long entries: Ctrl+J/K scrolls one line in reading focus; arrows continue selecting
+candidates. [/] jumps between source groups, and o opens the source-group outline.
+F4 switches split/focus reading, default split. Focus hides only the candidate
+pane while the definition is focused; input restores it. Text columns cap at 96.
+/ searches only currently displayed source content with case-insensitive literal
+matching. Input previews matches; Enter keeps, Esc restores the initial position;
+n/N repeats cyclically. Follow hints supersede highlighting. New words clear find.
+Layout/display changes and history restoration use source group/sense/text anchors;
+folded examples return to their parent sense. Ctrl+R selects existing session-only
+back/forward snapshots without logging typed queries or changing ranking.
 Action discovery: Ctrl+G/F3 opens a searchable fixed local-action menu. Disabled
 operations show a reason. Enter/click executes; Esc preserves the lookup. Only
 one overlay owns input, paste, and mouse at a time; queued completion waits for
