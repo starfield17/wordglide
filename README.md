@@ -1,5 +1,7 @@
 # Wordglide
 
+See [CHANGELOG.md](CHANGELOG.md) for release changes.
+
 A small offline English–English dictionary for reading in a terminal. Type a
 word or phrase and immediately see frequency-ranked candidates and the first
 candidate's definition. Enter is never needed to search.
