@@ -525,12 +525,8 @@ fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
                 );
                 if width >= 120 && height >= 12 {
                     let expected = vec![
-                        "Tab complete · Shift+Tab previous · Enter read · Ctrl+L focus · PgUp/PgDn or wheel scroll · F1 help · F2 appearance".to_string(),
-                        format!(
-                            "f follow · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+U new · Ctrl+C quit{}",
-                            app.history_len(),
-                            if loading { " · loading…" } else { "" }
-                        ),
+                        format!("Lookup · exact · 1/1 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
+                        "Enter read · Tab complete · Ctrl+G actions · F1 help · F2 settings · Ctrl+C quit".into(),
                     ];
                     assert_eq!(
                         lines, expected,
@@ -564,12 +560,8 @@ fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
                 );
                 if width >= 120 && height >= 12 {
                     let expected = vec![
-                        "Reading · PgUp/PgDn or wheel scroll · Home/End top/bottom · f follow · Esc input · e examples · p IPA · ? help".to_string(),
-                        format!(
-                            "Ctrl+L focus · Ctrl+Z back ({}) · Ctrl+Y forward · Ctrl+C quit{}",
-                            app.history_len(),
-                            if loading { " · loading…" } else { "" }
-                        ),
+                        format!("Reading · exact · 1/1 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
+                        "f follow · Ctrl+G actions · Esc input · F1 help · F2 settings · Ctrl+C quit".into(),
                     ];
                     assert_eq!(
                         lines, expected,
@@ -1040,17 +1032,17 @@ fn help_overlay_toggles_and_renders() {
 
     // F1 opens from input focus; Esc closes.
     stroke(&mut app, KeyCode::F(1));
-    assert!(app.view.show_help);
+    assert!(app.view.show_help());
     stroke(&mut app, KeyCode::Esc);
-    assert!(!app.view.show_help);
+    assert!(!app.view.show_help());
 
     // '?' opens from definition focus and any key other than Esc is swallowed.
     app.focus = Focus::Definition;
     stroke(&mut app, KeyCode::Char('?'));
-    assert!(app.view.show_help);
+    assert!(app.view.show_help());
     stroke(&mut app, KeyCode::Char('x'));
     assert!(
-        app.view.show_help,
+        app.view.show_help(),
         "plain keys must not type while help is open"
     );
 
@@ -1071,7 +1063,7 @@ fn help_overlay_toggles_and_renders() {
     );
 
     stroke(&mut app, KeyCode::Esc);
-    assert!(!app.view.show_help);
+    assert!(!app.view.show_help());
 }
 
 #[test]
@@ -1119,8 +1111,8 @@ fn appearance_mouse_is_modal_and_preserves_follow_hints() {
         original
     );
     stroke(&mut app, KeyCode::F(1));
-    assert!(app.view.show_help);
-    assert!(!app.view.show_appearance);
+    assert!(app.view.show_help());
+    assert!(!app.view.show_appearance());
     stroke(&mut app, KeyCode::Esc);
     paint(&mut app, &mut terminal, &mut pointer);
     assert!(app.picking);
@@ -1135,14 +1127,14 @@ fn queued_completions_wait_until_appearance_closes() {
     assert!(app.results.is_empty());
     stroke(&mut app, KeyCode::F(2));
     settle(&mut app);
-    assert!(app.view.show_appearance);
+    assert!(app.view.show_appearance());
     assert!(!app.loading);
     assert_eq!(app.appearance().color_theme, crate::ThemePreset::Default);
     assert_eq!(app.input, "fis");
     stroke(&mut app, KeyCode::Esc);
     app.poll();
     settle(&mut app);
-    assert!(!app.view.show_appearance);
+    assert!(!app.view.show_appearance());
     assert_eq!(app.input, "fist");
 }
 
