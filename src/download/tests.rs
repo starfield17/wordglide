@@ -72,15 +72,15 @@ impl Server {
             worker: Some(worker),
         };
         let release = serde_json::json!({"tag_name":"v1.0.0", "assets":[
-            {"name":"english-pack.tar.gz","size":archive.len(),"browser_download_url":format!("{base}/assets/english-pack.tar.gz")},
-            {"name":"SHA256SUMS.txt","size":84,"browser_download_url":format!("{base}/assets/SHA256SUMS.txt")}
+            {"name":"english-pack.tar.gz","size":archive.len(),"browser_download_url":format!("{base}/assets/v1.0.0/english-pack.tar.gz")},
+            {"name":"SHA256SUMS.txt","size":84,"browser_download_url":format!("{base}/assets/v1.0.0/SHA256SUMS.txt")}
         ]});
         server.put("/latest", serde_json::to_vec(&release).unwrap());
         server.put(
-            "/assets/SHA256SUMS.txt",
+            "/assets/v1.0.0/SHA256SUMS.txt",
             format!("{:x}  english-pack.tar.gz\n", Sha256::digest(&archive)).into_bytes(),
         );
-        server.put("/assets/english-pack.tar.gz", archive);
+        server.put("/assets/v1.0.0/english-pack.tar.gz", archive);
         server
     }
     fn put(&self, path: &str, body: Vec<u8>) {
@@ -165,7 +165,7 @@ fn installs_verified_pack_and_reuses_same_archive_without_downloading() {
         .routes
         .lock()
         .unwrap()
-        .remove("/assets/english-pack.tar.gz");
+        .remove("/assets/v1.0.0/english-pack.tar.gz");
     assert!(run(root.path(), &server.source).unwrap().already_current);
 }
 
@@ -208,7 +208,7 @@ fn failures_never_replace_existing_pointer() {
     }
     let broken = Server::new(bytes);
     broken.put(
-        "/assets/SHA256SUMS.txt",
+        "/assets/v1.0.0/SHA256SUMS.txt",
         format!("{}  english-pack.tar.gz\n", "0".repeat(64)).into_bytes(),
     );
     assert!(run(root.path(), &broken.source).is_err());
@@ -260,7 +260,7 @@ fn handles_cancellation_timeout_lock_contention_and_commit_failure() {
         .routes
         .lock()
         .unwrap()
-        .get_mut("/assets/english-pack.tar.gz")
+        .get_mut("/assets/v1.0.0/english-pack.tar.gz")
         .unwrap()
         .2 = Duration::from_millis(350);
     assert!(run(root.path(), &server.source).is_err());
@@ -268,7 +268,7 @@ fn handles_cancellation_timeout_lock_contention_and_commit_failure() {
         .routes
         .lock()
         .unwrap()
-        .get_mut("/assets/english-pack.tar.gz")
+        .get_mut("/assets/v1.0.0/english-pack.tar.gz")
         .unwrap()
         .2 = Duration::ZERO;
     fs::create_dir(root.path().join("current.json")).unwrap();
@@ -292,8 +292,11 @@ fn cancels_during_transfer_and_cleans_staging_without_switching_dictionary() {
     let root = tempfile::tempdir().unwrap();
     let cancel = AtomicBool::new(false);
     let error = install(root.path(), &server.source, &cancel, |update| {
-        if matches!(update, Progress::Bytes { .. }) { cancel.store(true, Ordering::Relaxed); }
-    }).unwrap_err();
+        if matches!(update, Progress::Bytes { .. }) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    })
+    .unwrap_err();
     assert!(error.to_string().contains("cancelled"));
     assert!(!root.path().join("current.json").exists());
     assert_eq!(fs::read_dir(root.path().join("packs")).unwrap().count(), 0);
@@ -304,12 +307,58 @@ fn activation_failure_cleans_verified_staging() {
     let fixture = pack();
     let server = Server::new(archive(&fixture.path().join("pack"), None));
     let root = tempfile::tempdir().unwrap();
-    let error = install(root.path(), &server.source, &AtomicBool::new(false), |update| {
-        if matches!(update, Progress::Info(ref text) if text.starts_with("Activating")) {
-            fs::create_dir(root.path().join("current.json")).unwrap();
-        }
-    }).unwrap_err();
+    let error = install(
+        root.path(),
+        &server.source,
+        &AtomicBool::new(false),
+        |update| {
+            if matches!(update, Progress::Info(ref text) if text.starts_with("Activating")) {
+                fs::create_dir(root.path().join("current.json")).unwrap();
+            }
+        },
+    )
+    .unwrap_err();
     assert!(format!("{error:#}").contains("Cannot activate"));
     assert!(root.path().join("current.json").is_dir());
     assert_eq!(fs::read_dir(root.path().join("packs")).unwrap().count(), 0);
+}
+
+#[test]
+fn assets_must_belong_to_the_pinned_release_tag() {
+    let fixture = pack();
+    let server = Server::new(archive(&fixture.path().join("pack"), None));
+    let mut routes = server.routes.lock().unwrap();
+    let metadata = routes.get_mut("/latest").unwrap();
+    let mut value: serde_json::Value = serde_json::from_slice(&metadata.1).unwrap();
+    value["tag_name"] = "v2.0.0".into();
+    metadata.1 = serde_json::to_vec(&value).unwrap();
+    drop(routes);
+    let root = tempfile::tempdir().unwrap();
+    assert!(run(root.path(), &server.source).is_err());
+    assert!(!root.path().join("current.json").exists());
+}
+
+#[test]
+fn rejects_tar_extension_records_even_when_the_resolved_path_is_whitelisted() {
+    let fixture = pack();
+    let normal = archive(&fixture.path().join("pack"), None);
+    let mut original = Vec::new();
+    flate2::read::GzDecoder::new(normal.as_slice()).read_to_end(&mut original).unwrap();
+    let name = b"english-pack/manifest.json\0";
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::GNULongName);
+    header.set_size(name.len() as u64);
+    header.set_mode(0o644);
+    header.set_cksum();
+    let mut builder = tar::Builder::new(Vec::new());
+    builder.append_data(&mut header, "././@LongLink", name.as_slice()).unwrap();
+    let mut bytes = builder.into_inner().unwrap();
+    bytes.truncate(1024); // one header and one padded payload, before end markers
+    bytes.extend(original);
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    gzip.write_all(&bytes).unwrap();
+    let server = Server::new(gzip.finish().unwrap());
+    let root = tempfile::tempdir().unwrap();
+    assert!(run(root.path(), &server.source).is_err());
+    assert!(!root.path().join("current.json").exists());
 }
