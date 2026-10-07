@@ -110,3 +110,82 @@ fn candidate_width_is_independent_of_result_word_lengths() {
     };
     assert_eq!(corners(&before), corners(&after));
 }
+
+#[test]
+fn reading_find_is_transactional_and_does_not_search_the_dictionary() {
+    let (_dir, mut app) = app("set");
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 120, 24);
+    key(&mut app, KeyCode::PageDown);
+    let original = app.scroll;
+    key(&mut app, KeyCode::Char('/'));
+    app.paste("divided by ability");
+    let text = screen(&mut app, 120, 24).join("\n");
+    assert!(text.contains("divided by ability"), "{text}");
+    assert!(text.contains("Find"), "{text}");
+    assert_eq!(app.input, "set");
+    assert!(!app.loading);
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.scroll, original);
+    key(&mut app, KeyCode::Char('/'));
+    app.paste("zzzz-not-present");
+    assert!(screen(&mut app, 120, 24).join("\n").contains("No matches"));
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.scroll, original);
+}
+
+#[test]
+fn outline_and_session_navigation_restore_real_locations() {
+    let (_dir, mut app) = app("set");
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 120, 24);
+    key(&mut app, KeyCode::Char('o'));
+    assert!(screen(&mut app, 120, 24).join("\n").contains("Outline"));
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 120, 24);
+    assert!(app.scroll > 0);
+    let position = app.scroll;
+    app.jump_to("fist");
+    settle(&mut app);
+    app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    app.paste("set");
+    assert!(
+        screen(&mut app, 120, 24)
+            .join("\n")
+            .contains("Session navigation")
+    );
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 120, 24);
+    assert_eq!(app.input, "set");
+    assert_eq!(app.scroll, position);
+    app.forward();
+    assert_eq!(app.input, "fist");
+}
+
+#[test]
+fn focus_layout_and_reading_preferences_are_additive() {
+    use wordglide::{Focus, ReadingLayout, ReadingPreferences};
+    let (_dir, mut app) = app("take");
+    assert_eq!(app.reading_preferences(), ReadingPreferences::default());
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 120, 24);
+    key(&mut app, KeyCode::Char(']'));
+    let before = screen(&mut app, 120, 24).join("\n");
+    assert!(before.contains("noun"));
+    key(&mut app, KeyCode::F(4));
+    let focused = screen(&mut app, 120, 24).join("\n");
+    assert!(!focused.contains("Candidates"));
+    assert!(focused.contains("noun"));
+    assert_eq!(
+        app.reading_preferences().reading_layout,
+        ReadingLayout::Focus
+    );
+    key(&mut app, KeyCode::Char('e'));
+    screen(&mut app, 80, 24);
+    assert!(app.reading_preferences().expand_examples);
+    assert!(screen(&mut app, 80, 24).join("\n").contains("noun"));
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.focus, Focus::Input);
+    assert!(screen(&mut app, 120, 24).join("\n").contains("Candidates"));
+}
