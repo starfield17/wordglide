@@ -249,4 +249,52 @@ mod tests {
                 .unwrap()
         );
     }
+
+    #[test]
+    fn reading_preferences_save_retry_and_preserve_cli_overrides() {
+        use crate::{ReadingLayout, ReadingPreferences};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        fs::write(&path, r#"{"color_theme":"whiteout","other":123}"#).unwrap();
+        let (mut store, appearance) = ConfigStore::load(
+            Some(path.clone()),
+            AppearanceOverrides {
+                color_theme: Some(ThemePreset::Orange),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let before = store.reading_preferences();
+        let after = ReadingPreferences {
+            reading_layout: ReadingLayout::Focus,
+            expand_examples: true,
+            ..before
+        };
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(
+            store
+                .save_preferences(appearance, appearance, before, after)
+                .is_err()
+        );
+        assert_eq!(store.reading_preferences(), before);
+        fs::remove_dir(&path).unwrap();
+        let next = ReadingPreferences {
+            expand_ipa: true,
+            ..after
+        };
+        assert!(
+            store
+                .save_preferences(appearance, appearance, after, next)
+                .unwrap()
+        );
+        let (restored, palette) =
+            ConfigStore::load(Some(path.clone()), AppearanceOverrides::default()).unwrap();
+        assert_eq!(restored.reading_preferences(), next);
+        assert_eq!(palette.color_theme, ThemePreset::Whiteout);
+        let values: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(values["other"], 123);
+        assert!(values.get("input").is_none());
+        assert!(values.get("history").is_none());
+    }
 }

@@ -189,3 +189,40 @@ fn focus_layout_and_reading_preferences_are_additive() {
     assert_eq!(app.focus, Focus::Input);
     assert!(screen(&mut app, 120, 24).join("\n").contains("Candidates"));
 }
+
+#[test]
+fn input_moves_and_deletes_whole_unicode_graphemes() {
+    let (_dir, mut app) = app("");
+    app.paste("a e\u{301} 👩‍💻");
+    let end = app.cursor;
+    key(&mut app, KeyCode::Left);
+    assert_eq!(&app.input[app.cursor..end], "👩‍💻");
+    key(&mut app, KeyCode::Delete);
+    assert_eq!(app.input, "a e\u{301} ");
+    key(&mut app, KeyCode::Backspace);
+    key(&mut app, KeyCode::Backspace);
+    assert_eq!(app.input, "a ");
+    assert_eq!(app.cursor, 2);
+}
+
+#[test]
+fn confirmed_search_wraps_and_new_word_clears_it() {
+    let (_dir, mut app) = app("set");
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 80, 24);
+    key(&mut app, KeyCode::Char('/'));
+    app.paste("a drum kit");
+    screen(&mut app, 80, 24);
+    key(&mut app, KeyCode::Enter);
+    let position = app.scroll;
+    key(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.scroll, position);
+    key(&mut app, KeyCode::Char('N'));
+    assert_eq!(app.scroll, position);
+    app.jump_to("fist");
+    settle(&mut app);
+    screen(&mut app, 80, 24);
+    key(&mut app, KeyCode::Char('n'));
+    assert_eq!(app.scroll, 0);
+    assert_eq!(app.input, "fist");
+}
