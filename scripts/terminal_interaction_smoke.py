@@ -134,7 +134,7 @@ def main():
         session = launch("fist")
         try:
             session.send(b"\x1bOQ")  # F2
-            session.wait(lambda: b"Appearance" in session.output, "restored settings panel")
+            session.wait(lambda: b"Settings" in session.output, "restored settings panel")
             session.wait(lambda: all(label in screen_text(session.output) for label in (
                 "Reading layout: focus", "Examples / references: full",
                 "Pronunciation (IPA): full")), "restored preferences")

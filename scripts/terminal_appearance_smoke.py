@@ -99,7 +99,7 @@ def main():
         try:
             assert not list(root.rglob("config.json")), "Startup must not create configuration"
             session.send(b"\x1bOQ")  # xterm F2
-            session.wait(lambda: b"Appearance" in session.output, "appearance panel")
+            session.wait(lambda: b"Settings" in session.output, "settings panel")
             for theme in ["orange", "gruvbox_light", "gruvbox_dark_v2", "whiteout", "default"]:
                 session.send(b"\x1b[C")
                 session.wait(lambda: preferences().get("color_theme") == theme, f"saved {theme}")
@@ -148,7 +148,7 @@ def main():
             session = launch(extra, overrides)
             try:
                 session.send(b"\x1bOQ")
-                session.wait(lambda: b"Appearance" in session.output, "color-free settings")
+                session.wait(lambda: b"Settings" in session.output, "color-free settings")
                 session.send(b"\x1b[C")
                 session.wait(lambda: preferences().get("color_theme") != "gruvbox_light", "color-free preference update")
                 for sgr in SGR.findall(session.output):
