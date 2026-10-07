@@ -260,3 +260,42 @@ fn new_panels_preserve_theme_and_no_color_contracts() {
         }
     }
 }
+
+#[test]
+fn settings_rows_edit_reading_preferences_without_changing_lookup_or_colors() {
+    use wordglide::ReadingLayout;
+    let (_dir, mut app) = app("fist");
+    let original = (
+        app.input.clone(),
+        app.selected,
+        app.scroll,
+        app.focus,
+        app.appearance(),
+    );
+    key(&mut app, KeyCode::F(2));
+    for _ in 0..3 {
+        key(&mut app, KeyCode::Down);
+    }
+    key(&mut app, KeyCode::Right);
+    assert_eq!(
+        app.reading_preferences().reading_layout,
+        ReadingLayout::Focus
+    );
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Right);
+    assert!(app.reading_preferences().expand_examples);
+    key(&mut app, KeyCode::Down);
+    key(&mut app, KeyCode::Right);
+    assert!(app.reading_preferences().expand_ipa);
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(
+        (
+            app.input.clone(),
+            app.selected,
+            app.scroll,
+            app.focus,
+            app.appearance()
+        ),
+        original
+    );
+}
