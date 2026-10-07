@@ -1,3 +1,4 @@
+mod actions;
 mod completion;
 mod history;
 mod keys;
@@ -8,8 +9,9 @@ use crate::{Appearance, Candidate, Dictionary, Preview, normalize, store::Lexico
 use crossterm::event::KeyEvent;
 use std::{collections::VecDeque, sync::mpsc};
 
+pub(crate) use actions::Action;
 use completion::Completion;
-pub(crate) use view::ViewOptions;
+pub(crate) use view::{Overlay, ViewOptions};
 use worker::{Request, Response};
 
 /// Cap on remembered navigation steps in either direction.
@@ -52,6 +54,8 @@ pub struct App {
     pub(crate) theme: Theme,
     pub(crate) view: ViewOptions,
     pub(crate) appearance_status: Option<String>,
+    pub(crate) panel_query: String,
+    pub(crate) mouse_enabled: bool,
     lexicon: Lexicon,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
@@ -85,6 +89,8 @@ impl App {
             theme: Theme::colored(),
             view: ViewOptions::default(),
             appearance_status: None,
+            panel_query: String::new(),
+            mouse_enabled: true,
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -125,6 +131,10 @@ impl App {
     /// Render without color; equivalent to `set_color(false)`.
     pub fn set_plain(&mut self) {
         self.set_color(false);
+    }
+
+    pub(crate) fn forward_len(&self) -> usize {
+        self.forward.len()
     }
 
     pub fn history_len(&self) -> usize {
@@ -210,11 +220,7 @@ impl App {
                 _ => {}
             }
         }
-        if !self.loading
-            && !self.pending_completion.is_empty()
-            && !self.view.show_help
-            && !self.view.show_appearance
-        {
+        if !self.loading && !self.pending_completion.is_empty() && !self.view.modal() {
             let pending = std::mem::take(&mut self.pending_completion);
             let generation = self.generation;
             for key in pending {

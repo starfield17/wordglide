@@ -77,6 +77,22 @@ to either location, or keep using `--data`. The application never downloads data
 Add `--no-color` (or set `NO_COLOR`) for a color-free rendering, and `--no-mouse`
 to keep native terminal text selection.
 
+## Finding actions
+
+Press **Ctrl+G** or **F3** to search available actions. Type or paste a filter,
+use ↑/↓ to select, and press Enter or click a row to run it. Unavailable actions
+show their reason; Esc cancels without changing your lookup. Existing shortcuts
+still work. F1 help scrolls with ↑/↓, PageUp/PageDown, Home/End, and the wheel.
+The bottom line's shortcuts are clickable.
+
+The candidate column stays the same width as you type. `=` marks exact matches,
+`→` word forms, and `≈` spelling suggestions. The status line shows focus,
+match type, candidate position, and available back/forward locations.
+
+The action menu also toggles mouse capture for the current session, allowing
+native terminal selection without restarting. `--no-mouse` selects its initial
+state. Idle sessions redraw only when input, a result, or the terminal size changes.
+
 ## Themes and appearance
 
 Press **F2** from either pane to open appearance settings. Use ↑/↓ to choose a
@@ -190,6 +206,7 @@ data and code licenses.
 | `e` in definition | Examples and references: compact / full |
 | `p` in definition | Pronunciation (IPA): short / full |
 | `?` in definition / `F1` | Show the key help; Esc closes it |
+| Ctrl+G / F3 | Search and run available actions |
 | `F2` | Theme, background, and Truecolor settings; changes save automatically |
 | Click in definition | Focus the definition pane |
 | Click a word in the focused definition | Follow that word |

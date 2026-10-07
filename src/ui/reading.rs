@@ -178,7 +178,7 @@ fn empty_state(app: &App) -> String {
     }
     let query = crate::normalize(&app.input);
     if query.is_empty() {
-        "Start typing an English word or phrase.".into()
+        "Start typing an English word or phrase. Enter reads the selected word; Ctrl+G opens actions; F1 shows keys.".into()
     } else if query.chars().count() < 3 {
         format!("No word starts with \"{query}\". Spelling suggestions need at least 3 letters.")
     } else {

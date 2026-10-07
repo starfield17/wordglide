@@ -1,10 +1,10 @@
-use crate::{App, Focus, theme::Theme};
+use super::pointer::{Pointer, Region};
+use crate::{App, Focus, app::Action, theme::Theme};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Style,
     text::Line,
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -29,7 +29,20 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 
 fn help_lines(theme: Theme) -> Vec<Line<'static>> {
     let heading = |text: &str| Line::styled(text.to_string(), theme.heading());
-    let body = |text: &str| Line::styled(text.to_string(), Style::default());
+    let body = |text: &str| {
+        let (keys, description) = text.split_once(" · ").unwrap_or((text, ""));
+        Line::from(vec![
+            ratatui::text::Span::styled(keys.to_string(), theme.body()),
+            ratatui::text::Span::styled(
+                if description.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · {description}")
+                },
+                theme.dim(),
+            ),
+        ])
+    };
     vec![
         heading("Lookup"),
         body("  Type to search · Enter accept and read · Ctrl+L switch focus"),
@@ -48,11 +61,12 @@ fn help_lines(theme: Theme) -> Vec<Line<'static>> {
         body("  Click a candidate to preview; click it again to accept"),
         heading("Other"),
         body("  Ctrl+Z back · Ctrl+Y forward · Ctrl+C quit · ? or F1 this help"),
+        body("  Ctrl+G / F3 actions · search all available operations"),
         body("  F2 appearance: theme, background, Truecolor (auto-saved)"),
     ]
 }
 
-pub(super) fn render_help(frame: &mut Frame, app: &App) {
+pub(super) fn render_help(frame: &mut Frame, app: &mut App) {
     let area = centered_rect(88, 84, frame.area());
     frame.render_widget(Clear, area);
     let block = Block::default()
@@ -61,10 +75,33 @@ pub(super) fn render_help(frame: &mut Frame, app: &App) {
         .style(app.theme.surface())
         .title(" Keys · Esc closes ")
         .border_style(app.theme.focused_border());
+    let inner = block.inner(area);
+    let lines = help_lines(app.theme);
+    let lines = super::reading::wrap(
+        lines
+            .into_iter()
+            .map(|source| {
+                let mut line = super::reading::ReadingLine::new(String::new(), source.style);
+                for span in source.spans {
+                    let start = line.text.len();
+                    line.text.push_str(&span.content);
+                    line.styles
+                        .push((start..line.text.len(), source.style.patch(span.style)));
+                }
+                line
+            })
+            .collect(),
+        inner.width as usize,
+    );
+    let count = lines.len();
+    app.view.help_scroll = app
+        .view
+        .help_scroll
+        .min(count.saturating_sub(inner.height as usize));
     frame.render_widget(
-        Paragraph::new(help_lines(app.theme))
-            .block(block)
-            .wrap(Wrap { trim: false }),
+        Paragraph::new(lines.iter().map(|l| l.rendered()).collect::<Vec<_>>())
+            .scroll((app.view.help_scroll.min(u16::MAX as usize) as u16, 0))
+            .block(block),
         area,
     );
 }
@@ -207,196 +244,134 @@ fn format_footer_help(
     }
 }
 
-pub(super) fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<String> {
-    let segments = if app.picking {
+pub(super) fn footer_actions(app: &App, width: usize) -> Vec<(&'static str, Action)> {
+    let actions = if app.focus == Focus::Definition {
         vec![
-            HelpSegment {
-                text: format!("Label: {}_ ", app.label_input),
-                line: 0,
-                order: 0,
-                priority: 1,
-            },
-            HelpSegment {
-                text: "type both letters".into(),
-                line: 0,
-                order: 1,
-                priority: 3,
-            },
-            HelpSegment {
-                text: "PgUp/PgDn scroll".into(),
-                line: 0,
-                order: 2,
-                priority: 4,
-            },
-            HelpSegment {
-                text: "Esc cancels".into(),
-                line: 0,
-                order: 3,
-                priority: 2,
-            },
-            HelpSegment {
-                text: "Ctrl+C quit".into(),
-                line: 0,
-                order: 4,
-                priority: 0,
-            },
-        ]
-    } else if app.focus == Focus::Definition {
-        let loading_suffix = if app.loading { " · loading…" } else { "" };
-        vec![
-            HelpSegment {
-                text: "Reading".into(),
-                line: 0,
-                order: 0,
-                priority: 3,
-            },
-            HelpSegment {
-                text: "PgUp/PgDn or wheel scroll".into(),
-                line: 0,
-                order: 1,
-                priority: 6,
-            },
-            HelpSegment {
-                text: "Home/End top/bottom".into(),
-                line: 0,
-                order: 2,
-                priority: 8,
-            },
-            HelpSegment {
-                text: "f follow".into(),
-                line: 0,
-                order: 3,
-                priority: 2,
-            },
-            HelpSegment {
-                text: "Esc input".into(),
-                line: 0,
-                order: 4,
-                priority: 1,
-            },
-            HelpSegment {
-                text: "e examples".into(),
-                line: 0,
-                order: 5,
-                priority: 9,
-            },
-            HelpSegment {
-                text: "p IPA".into(),
-                line: 0,
-                order: 6,
-                priority: 10,
-            },
-            HelpSegment {
-                text: "? help".into(),
-                line: 0,
-                order: 7,
-                priority: 11,
-            },
-            HelpSegment {
-                text: "Ctrl+L focus".into(),
-                line: 1,
-                order: 0,
-                priority: 4,
-            },
-            HelpSegment {
-                text: format!("Ctrl+Z back ({})", app.history_len()),
-                line: 1,
-                order: 1,
-                priority: 5,
-            },
-            HelpSegment {
-                text: "Ctrl+Y forward".into(),
-                line: 1,
-                order: 2,
-                priority: 7,
-            },
-            HelpSegment {
-                text: format!("Ctrl+C quit{loading_suffix}"),
-                line: 1,
-                order: 3,
-                priority: 0,
-            },
+            ("f follow", Action::Follow),
+            ("Ctrl+G actions", Action::Commands),
+            ("Esc input", Action::Focus),
+            ("F1 help", Action::Help),
+            ("F2 settings", Action::Settings),
         ]
     } else {
-        let loading_suffix = if app.loading { " · loading…" } else { "" };
         vec![
-            HelpSegment {
-                text: "Tab complete".into(),
-                line: 0,
-                order: 0,
-                priority: 2,
-            },
-            HelpSegment {
-                text: "Shift+Tab previous".into(),
-                line: 0,
-                order: 1,
-                priority: 7,
-            },
-            HelpSegment {
-                text: "Enter read".into(),
-                line: 0,
-                order: 2,
-                priority: 1,
-            },
-            HelpSegment {
-                text: "Ctrl+L focus".into(),
-                line: 0,
-                order: 3,
-                priority: 4,
-            },
-            HelpSegment {
-                text: "PgUp/PgDn or wheel scroll".into(),
-                line: 0,
-                order: 4,
-                priority: 9,
-            },
-            HelpSegment {
-                text: "F1 help".into(),
-                line: 0,
-                order: 5,
-                priority: 10,
-            },
-            HelpSegment {
-                text: "f follow".into(),
-                line: 1,
-                order: 0,
-                priority: 5,
-            },
-            HelpSegment {
-                text: format!("Ctrl+Z back ({})", app.history_len()),
-                line: 1,
-                order: 1,
-                priority: 6,
-            },
-            HelpSegment {
-                text: "Ctrl+Y forward".into(),
-                line: 1,
-                order: 2,
-                priority: 8,
-            },
-            HelpSegment {
-                text: "Ctrl+U new".into(),
-                line: 1,
-                order: 3,
-                priority: 3,
-            },
-            HelpSegment {
-                text: format!("Ctrl+C quit{loading_suffix}"),
-                line: 1,
-                order: 4,
-                priority: 0,
-            },
+            ("Enter read", Action::Accept),
+            ("Tab complete", Action::Complete),
+            ("Ctrl+G actions", Action::Commands),
+            ("F1 help", Action::Help),
+            ("F2 settings", Action::Settings),
         ]
     };
-
-    let mut segments = segments;
-    if !app.picking {
-        segments.push(HelpSegment {
-            text: "F2 appearance".into(),
-            line: 0,
-            order: 6,
-            priority: 11,
-        });
+    let mut used = "Ctrl+C quit".width();
+    let mut result = Vec::new();
+    for item in actions {
+        if used + 3 + item.0.width() <= width {
+            used += 3 + item.0.width();
+            result.push(item);
+        }
     }
-    format_footer_help(&segments, width, line_count)
+    result.push(("Ctrl+C quit", Action::Quit));
+    result
+}
+
+pub(super) fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<String> {
+    if width == 0 || line_count == 0 {
+        return Vec::new();
+    }
+    if app.picking {
+        let segments = [
+            (format!("Label: {}_ ", app.label_input), 1),
+            ("type both letters".into(), 3),
+            ("PgUp/PgDn scroll".into(), 4),
+            ("Esc cancels".into(), 2),
+            ("Ctrl+C quit".into(), 0),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(order, (text, priority))| HelpSegment {
+            text,
+            line: 0,
+            order,
+            priority,
+        })
+        .collect::<Vec<_>>();
+        return format_footer_help(&segments, width, line_count);
+    }
+    let shortcuts = truncate_to_width(
+        &footer_actions(app, width)
+            .iter()
+            .map(|(text, _)| *text)
+            .collect::<Vec<_>>()
+            .join(" · "),
+        width,
+    );
+    if line_count == 1 {
+        return vec![shortcuts];
+    }
+    let kind = app
+        .results
+        .get(app.selected)
+        .map_or("no match", |c| match c.kind {
+            crate::MatchKind::Exact => "exact",
+            crate::MatchKind::Prefix => "prefix",
+            crate::MatchKind::Inflection => "word form",
+            crate::MatchKind::Fuzzy => "spelling suggestion",
+        });
+    let state = if app.focus == Focus::Input {
+        "Lookup"
+    } else {
+        "Reading"
+    };
+    let status = format!(
+        "{state} · {kind} · {}/{} · Back {} / Forward {}{}",
+        if app.results.is_empty() {
+            0
+        } else {
+            app.selected + 1
+        },
+        app.results.len(),
+        app.history_len(),
+        app.forward_len(),
+        if app.loading { " · loading…" } else { "" }
+    );
+    let status = app
+        .error
+        .as_deref()
+        .or_else(|| {
+            app.appearance_status
+                .as_deref()
+                .filter(|s| s.starts_with("Not saved:"))
+        })
+        .unwrap_or(&status);
+    vec![truncate_to_width(status, width), shortcuts]
+}
+
+pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Pointer) {
+    let lines = footer_help(app, area.width as usize, area.height as usize);
+    frame.render_widget(
+        Paragraph::new(lines.clone().into_iter().map(Line::raw).collect::<Vec<_>>()).style(
+            if app.error.is_some()
+                || app
+                    .appearance_status
+                    .as_deref()
+                    .is_some_and(|s| s.starts_with("Not saved:"))
+            {
+                app.theme.error()
+            } else {
+                app.theme.dim()
+            },
+        ),
+        area,
+    );
+    if !app.picking {
+        let mut x = area.x;
+        let y = area.y + lines.len().saturating_sub(1) as u16;
+        for (label, action) in footer_actions(app, area.width as usize) {
+            let width = label.width().min(area.width as usize) as u16;
+            pointer
+                .footer
+                .push((Region::from(Rect::new(x, y, width, 1)), action));
+            x += width + 3;
+        }
+    }
 }

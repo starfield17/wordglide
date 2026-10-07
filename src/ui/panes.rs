@@ -2,7 +2,7 @@ use crate::{App, Focus, MatchKind};
 use ratatui::{
     Frame,
     layout::Rect,
-    text::Line,
+    text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 use std::collections::HashMap;
@@ -17,18 +17,58 @@ pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointe
         .results
         .iter()
         .map(|c| {
-            let hint = match c.kind {
+            let marker = match c.kind {
+                MatchKind::Exact => " =",
                 MatchKind::Fuzzy => " ≈",
                 MatchKind::Inflection => " →",
-                _ => "",
+                MatchKind::Prefix => "",
             };
-            ListItem::new(format!("{}{}", c.headword, hint))
+            let available = area.width.saturating_sub(4) as usize;
+            let mut text = String::new();
+            let max = available.saturating_sub(marker.width());
+            for grapheme in c.headword.graphemes(true) {
+                if text.width() + grapheme.width()
+                    > max.saturating_sub(usize::from(c.headword.width() > max))
+                {
+                    break;
+                }
+                text.push_str(grapheme);
+            }
+            if text != c.headword && max > 0 {
+                text.push('…');
+            }
+            let query = crate::normalize(&app.input);
+            let mut prefix_end = 0;
+            if !query.is_empty() && c.key.starts_with(&query) {
+                for (offset, g) in text.grapheme_indices(true) {
+                    let normalized = crate::normalize(&text[..offset + g.len()]);
+                    if query.starts_with(&normalized) {
+                        prefix_end = offset + g.len();
+                    }
+                    if normalized == query {
+                        break;
+                    }
+                }
+            }
+            ListItem::new(Line::from(vec![
+                Span::styled(text[..prefix_end].to_string(), app.theme.heading()),
+                Span::raw(text[prefix_end..].to_string()),
+                Span::styled(marker, app.theme.dim()),
+            ]))
         })
         .collect();
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(format!(" Candidates · {} ", app.results.len()))
+        .title(format!(
+            " Candidates · {}/{} ",
+            if app.results.is_empty() {
+                0
+            } else {
+                app.selected + 1
+            },
+            app.results.len()
+        ))
         .border_style(app.theme.idle_border());
     let inner = block.inner(area);
     let list = List::new(items)

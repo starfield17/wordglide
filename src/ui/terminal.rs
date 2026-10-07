@@ -94,6 +94,7 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
         ConfigStore::load(options.config_path.clone(), options.appearance)?;
     let mut app = App::new(dictionary, query);
     app.set_color(options.color);
+    app.mouse_enabled = options.mouse;
     app.set_appearance(appearance);
     if options.config_path.is_none() {
         app.appearance_status = Some("Session only: no configuration path".into());
@@ -124,8 +125,9 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
             terminal.draw(|frame| render(frame, &mut app, &mut pointer))?;
             dirty = false;
         }
-        if event::poll(Duration::from_millis(5))? {
+        if event::poll(Duration::from_millis(if app.loading { 5 } else { 100 }))? {
             let before = app.appearance();
+            let mouse_before = app.mouse_enabled;
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
                     app.handle_key(key);
@@ -142,6 +144,14 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
                     dirty = true;
                 }
                 _ => {}
+            }
+            if mouse_before != app.mouse_enabled {
+                execute!(
+                    io::stdout(),
+                    MouseTracking {
+                        enabled: app.mouse_enabled
+                    }
+                )?;
             }
             let after = app.appearance();
             if before != after {

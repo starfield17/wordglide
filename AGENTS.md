@@ -14,8 +14,8 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `src/lib.rs`: public contract; private modules enforce internal visibility.
 - `src/index.rs`: compact lexicon codec, prebuilt ranking, prefix top-k, fuzzy queries.
 - `src/store.rs`, `src/build.rs`: lightweight open, explicit full verification, pack assembly.
-- `src/app/`: navigation state, asynchronous result ownership, keys, completion, history, worker, and view options.
-- `src/ui/`: rendering, reading layout, panes, help, and mouse hit-testing.
+- `src/app/`: navigation state, asynchronous result ownership, keys, completion, history, worker, fixed actions, and view options.
+- `src/ui/`: rendering, reading layout, panes, help, action panels, and mouse hit-testing.
 - `src/theme.rs`: built-in palettes, appearance types, color roles, RGB-to-256 conversion.
 - `src/config.rs`: appearance-only configuration loading and atomic saving.
 - `src/ui/appearance.rs`: F2 appearance panel; terminal entry owns persistence.

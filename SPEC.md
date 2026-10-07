@@ -66,6 +66,14 @@ the entry and shows scroll progress. Candidate panes size to their content, and
 a definition retained during loading is dimmed. An error is shown as a banner
 above the last good definition. Existing phrases included. Navigation history
 is session-only and does not affect ranking.
+Action discovery: Ctrl+G/F3 opens a searchable fixed local-action menu. Disabled
+operations show a reason. Enter/click executes; Esc preserves the lookup. Only
+one overlay owns input, paste, and mouse at a time; queued completion waits for
+it to close. Help scrolls with arrows, page keys, Home/End, and the wheel.
+Wide candidate panes use 24% of terminal width clamped to 20–36 columns,
+independent of results. Candidate markers and the status line distinguish exact,
+prefix, word-form, and fuzzy matches; footer shortcuts are clickable. The menu
+can toggle mouse capture for the session; --no-mouse sets its initial state.
 Appearance: five built-in palettes (`default`, `orange`, `gruvbox_light`,
 `gruvbox_dark_v2`, `whiteout`), the latter four adapted from btop for reading.
 Headword emphasis is separate from POS/IPA; examples and sources use readable

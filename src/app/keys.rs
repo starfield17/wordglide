@@ -57,35 +57,21 @@ impl App {
             self.exit = true;
             return;
         }
-        if key.code == KeyCode::F(2) {
-            self.view.show_appearance = !self.view.show_appearance;
-            self.view.show_help = false;
-            return;
-        }
-        if key.code == KeyCode::F(1) {
-            self.view.show_help = !self.view.show_help;
-            self.view.show_appearance = false;
-            return;
-        }
-        if self.view.show_appearance {
-            match key.code {
-                KeyCode::Esc | KeyCode::Enter => self.view.show_appearance = false,
-                KeyCode::Up => self.view.appearance_row = (self.view.appearance_row + 2) % 3,
-                KeyCode::Down => self.view.appearance_row = (self.view.appearance_row + 1) % 3,
-                KeyCode::Left => self.change_appearance(true),
-                KeyCode::Right | KeyCode::Char(' ') => self.change_appearance(false),
-                _ => {}
+        let panel = match key.code {
+            KeyCode::F(1) => Some(Overlay::Help),
+            KeyCode::F(2) => Some(Overlay::Appearance),
+            KeyCode::F(3) => Some(Overlay::Commands),
+            KeyCode::Char('g') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Overlay::Commands)
             }
+            _ => None,
+        };
+        if let Some(panel) = panel {
+            self.open_panel(panel);
             return;
         }
-        // Help is modal even while the initial lookup has no candidates yet.
-        if self.view.show_help {
-            if matches!(
-                key.code,
-                KeyCode::Esc | KeyCode::Char('?') | KeyCode::Enter | KeyCode::Char(' ')
-            ) {
-                self.view.show_help = false;
-            }
+        if self.view.modal() {
+            self.panel_key(key);
             return;
         }
         let completion_key = matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter)
@@ -231,7 +217,7 @@ impl App {
                 self.view.expand_examples = !self.view.expand_examples;
             }
             KeyCode::Char('?') if self.focus == Focus::Definition => {
-                self.view.show_help = true;
+                self.open_panel(Overlay::Help);
             }
             KeyCode::Home if self.focus == Focus::Definition => self.scroll = 0,
             KeyCode::End if self.focus == Focus::Definition => self.scroll = self.max_scroll,
@@ -275,7 +261,10 @@ impl App {
     }
 
     pub fn paste(&mut self, text: &str) {
-        if self.view.show_help || self.view.show_appearance {
+        if self.view.modal() {
+            if self.view.overlay == Overlay::Commands {
+                self.panel_paste(text);
+            }
             return;
         }
         if self.focus == Focus::Input {

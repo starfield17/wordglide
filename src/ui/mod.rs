@@ -1,5 +1,6 @@
 mod appearance;
 mod help;
+mod panels;
 mod panes;
 mod pointer;
 mod reading;
@@ -7,8 +8,10 @@ mod terminal;
 
 pub use terminal::{RunOptions, run, run_with_options};
 
-use crate::{App, Focus};
-use help::{footer_help, render_help};
+use crate::{App, Focus, app::Overlay};
+#[cfg(test)]
+use help::footer_help;
+use help::{render_footer, render_help};
 use panes::{render_candidates, render_definition};
 use pointer::{Pointer, Region};
 use ratatui::{
@@ -74,23 +77,14 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
         .block(input_block),
         rows[0],
     );
-    if app.focus == Focus::Input && !app.picking && !app.view.show_help && !app.view.show_appearance
-    {
+    if app.focus == Focus::Input && !app.picking && !app.view.modal() {
         frame.set_cursor_position((
             rows[0].x + 1 + before[start..].width() as u16,
             rows[0].y + 1,
         ));
     }
     let panes = if area.width >= 80 {
-        let longest = app
-            .results
-            .iter()
-            .map(|c| c.headword.width())
-            .max()
-            .unwrap_or(0);
-        let min_w = (area.width as usize * 18) / 100;
-        let max_w = (area.width as usize * 40) / 100;
-        let width = ((longest + 4).clamp(min_w, max_w).max(16)) as u16;
+        let width = ((area.width as usize * 24) / 100).clamp(20, 36) as u16;
         Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(width), Constraint::Min(1)])
@@ -109,15 +103,14 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
     pointer.definition = Region::from(panes[1]);
     render_candidates(frame, app, panes[0], pointer);
     render_definition(frame, app, panes[1], pointer);
-    let help_lines = footer_help(app, rows[2].width as usize, rows[2].height as usize);
-    frame.render_widget(
-        Paragraph::new(help_lines.join("\n")).style(app.theme.dim()),
-        rows[2],
-    );
-    if app.view.show_help {
+    render_footer(frame, app, rows[2], pointer);
+    if app.view.show_help() {
         render_help(frame, app);
     }
-    if app.view.show_appearance {
+    if app.view.overlay == Overlay::Commands {
+        panels::render_commands(frame, app, pointer);
+    }
+    if app.view.show_appearance() {
         appearance::render_appearance(frame, app, pointer);
     }
 }

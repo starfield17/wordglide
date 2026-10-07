@@ -1,4 +1,7 @@
-use crate::{App, Focus};
+use crate::{
+    App, Focus,
+    app::{Action, Overlay},
+};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use unicode_segmentation::UnicodeSegmentation;
@@ -54,6 +57,9 @@ struct HitRow {
 #[derive(Default)]
 pub(super) struct Pointer {
     pub(super) input: Region,
+    pub(super) panel: Region,
+    pub(super) command_rows: Vec<(Region, Action, usize)>,
+    pub(super) footer: Vec<(Region, Action)>,
     pub(super) definition: Region,
     pub(super) candidates: Region,
     pub(super) candidates_offset: usize,
@@ -65,6 +71,9 @@ pub(super) struct Pointer {
 impl Pointer {
     pub(super) fn reset(&mut self) {
         self.input = Region::default();
+        self.panel = Region::default();
+        self.command_rows.clear();
+        self.footer.clear();
         self.definition = Region::default();
         self.candidates = Region::default();
         self.candidates_offset = 0;
@@ -121,7 +130,7 @@ impl Pointer {
 /// visible state changed. Motion and drag are ignored so `?1003h` traffic never
 /// forces a redraw.
 pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> bool {
-    if app.view.show_appearance {
+    if app.view.show_appearance() {
         match mouse.kind {
             MouseEventKind::ScrollUp => app.view.appearance_row = (app.view.appearance_row + 2) % 3,
             MouseEventKind::ScrollDown => {
@@ -143,12 +152,41 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
         }
         return true;
     }
-    if app.view.show_help {
-        if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-            app.view.show_help = false;
-            return true;
+    if app.view.show_help() {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                app.view.help_scroll = app.view.help_scroll.saturating_sub(WHEEL_LINES)
+            }
+            MouseEventKind::ScrollDown => {
+                app.view.help_scroll = app.view.help_scroll.saturating_add(WHEEL_LINES)
+            }
+            MouseEventKind::Down(MouseButton::Left) => app.view.overlay = Overlay::None,
+            _ => return false,
         }
-        return false;
+        return true;
+    }
+    if app.view.overlay == Overlay::Commands {
+        match mouse.kind {
+            MouseEventKind::ScrollUp => app.view.panel_row = app.view.panel_row.saturating_sub(1),
+            MouseEventKind::ScrollDown => {
+                app.view.panel_row =
+                    (app.view.panel_row + 1).min(app.commands().len().saturating_sub(1))
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some((_, action, index)) = pointer
+                    .command_rows
+                    .iter()
+                    .find(|(region, _, _)| region.contains(mouse.column, mouse.row))
+                {
+                    app.view.panel_row = *index;
+                    app.execute_action(*action);
+                } else {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+        return true;
     }
     match mouse.kind {
         MouseEventKind::ScrollUp => return app.scroll_by(-(WHEEL_LINES as isize)),
@@ -157,6 +195,14 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
         // Motion, drag, and other buttons are never read, so they must not
         // force a redraw either.
         _ => return false,
+    }
+    if let Some((_, action)) = pointer
+        .footer
+        .iter()
+        .find(|(region, _)| region.contains(mouse.column, mouse.row))
+    {
+        app.execute_action(*action);
+        return true;
     }
     if pointer.definition.contains(mouse.column, mouse.row) {
         if app.picking {
