@@ -284,3 +284,32 @@ fn installed_pointer_cannot_escape_managed_storage() {
         assert!(locate(root.path()).is_err());
     }
 }
+
+#[test]
+fn cancels_during_transfer_and_cleans_staging_without_switching_dictionary() {
+    let fixture = pack();
+    let server = Server::new(archive(&fixture.path().join("pack"), None));
+    let root = tempfile::tempdir().unwrap();
+    let cancel = AtomicBool::new(false);
+    let error = install(root.path(), &server.source, &cancel, |update| {
+        if matches!(update, Progress::Bytes { .. }) { cancel.store(true, Ordering::Relaxed); }
+    }).unwrap_err();
+    assert!(error.to_string().contains("cancelled"));
+    assert!(!root.path().join("current.json").exists());
+    assert_eq!(fs::read_dir(root.path().join("packs")).unwrap().count(), 0);
+}
+
+#[test]
+fn activation_failure_cleans_verified_staging() {
+    let fixture = pack();
+    let server = Server::new(archive(&fixture.path().join("pack"), None));
+    let root = tempfile::tempdir().unwrap();
+    let error = install(root.path(), &server.source, &AtomicBool::new(false), |update| {
+        if matches!(update, Progress::Info(ref text) if text.starts_with("Activating")) {
+            fs::create_dir(root.path().join("current.json")).unwrap();
+        }
+    }).unwrap_err();
+    assert!(format!("{error:#}").contains("Cannot activate"));
+    assert!(root.path().join("current.json").is_dir());
+    assert_eq!(fs::read_dir(root.path().join("packs")).unwrap().count(), 0);
+}
