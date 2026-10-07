@@ -203,4 +203,18 @@ mod tests {
         assert!(!color_enabled_from(true, Some(OsStr::new(""))));
         assert!(!color_enabled_from(true, Some(OsStr::new("1"))));
     }
+
+    #[test]
+    fn managed_download_precedes_bundled_data_but_not_explicit_overrides() {
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("wordglide");
+        fs::write(&executable, "fixture").unwrap();
+        fs::create_dir(root.path().join("english-pack")).unwrap();
+        let managed = root.path().join("managed");
+        assert_eq!(resolve_with_download(None, None, &executable, None, || Ok(Some(managed.clone()))).unwrap(), managed);
+        for (explicit, environment) in [(Some(managed.clone()), None), (None, Some(managed.clone()))] {
+            assert_eq!(resolve_with_download(explicit, environment, &executable, None, || anyhow::bail!("invalid receipt")).unwrap(), managed);
+        }
+        assert!(resolve_with_download(None, None, &executable, None, || anyhow::bail!("invalid receipt")).is_err());
+    }
 }
