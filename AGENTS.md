@@ -1,8 +1,9 @@
 # Project map
 
 Run `make check`: formatting, Clippy (all owned targets), Rust tests/doc tests,
-and Python pipeline tests. `make build` builds the release binaries; `make clean`
-removes the cargo target directory. Keep code, scripts, and Makefile portable: do
+and Python pipeline tests. `make build` cleans Cargo outputs before building release binaries; `make clean`
+removes the Cargo target directory. `make clean-all` also removes disposable
+`artifacts/` and `dist/` outputs, while retaining `data/` and installed packs. Keep code, scripts, and Makefile portable: do
 not embed developer-specific paths, environment activation, or machine settings.
 The Makefile defaults to `python3`; select a Python environment at invocation.
 Do not commit personal paths, usernames, environment names, or machine details,
@@ -27,6 +28,7 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `scripts/terminal_interaction_smoke.py`: POSIX PTY reading navigation, menus, preferences, and mouse toggles.
 - `scripts/terminal_appearance_smoke.py`: PTY theme, save/retry, color-mode and restart checks.
 - `scripts/package.py`: validated program and shared-data release archives.
+- `.github/workflows/check.yml`: source checks, native sample PTY checks, and MSRV compilation.
 - `.github/workflows/release.yml`: tag-triggered native builds and publication.
 - `data-release.json`: pinned dictionary Release asset and checksum; CI input only.
 - `tests/`: public API and real pack integration scenarios.

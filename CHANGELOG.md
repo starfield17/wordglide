@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- CI separates shared source checks from native program checks, adds MSRV
+  compilation and Cargo caches, and verifies the complete shared dictionary once
+  during release assembly. Platform artifacts contain only program archives.
+- `make build` cleans Cargo outputs before building locked release binaries.
+  `make clean-all` also removes disposable verification and packaging outputs.
+
 ## 0.4.0
 
 - Startup without a usable dictionary opens Settings and download guidance. The

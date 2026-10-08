@@ -187,3 +187,17 @@ bytes and never calls the data generator.
 - Word frequency cannot infer the relative frequency of senses within a word.
 - Custom theme files and btop `.theme` imports are deferred; only built-in
   palettes are supported. No automatic light/dark detection or theme downloads.
+
+## Maintainer builds and release checks
+
+`make build` cleans the selected Cargo target directory, then builds all release
+binaries with locked dependencies. `make clean-all` additionally removes only the
+repository's disposable artifacts/ and dist/ directories; data/ and user-installed
+packs remain. Incremental Cargo commands remain available separately.
+Ordinary CI checks main pushes and PRs with format/Python checks once, native
+macOS/Linux Rust and sample PTY checks, and Rust 1.88 compilation. Tag releases
+retain all four native targets, validating programs against the sample pack on
+each platform. The shared complete dictionary is downloaded and verified once
+at assembly, including full entry verification using the Linux x86_64 program.
+Only program archives enter platform artifacts. Publication keeps four programs,
+one shared dictionary and combined checksums; manual dispatch never publishes.

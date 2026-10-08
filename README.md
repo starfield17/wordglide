@@ -119,7 +119,7 @@ verified with the packaged source and tests. Supported environments are
 macOS and Linux terminals; Windows is out of scope for now.
 
 ```sh
-cargo build --release --bins
+make build
 ./target/release/dict-build \
   --input examples/sample/entries.jsonl \
   --source examples/sample/source.json \
@@ -469,13 +469,24 @@ python3 scripts/prepare.py --input data/sample-source/raw.jsonl \
 ## Checks, benchmarks, and distribution
 
 ```sh
-make build                 # release wordglide, dict-build, dict-bench
+make build                 # clean Cargo outputs, then build all three release programs
 make check                 # or make check PYTHON=/path/to/python
-make clean                 # remove the cargo target directory
+make clean                 # remove the Cargo target directory
+make clean-all             # also delete artifacts/ and dist/; keep data/
 python3 scripts/terminal_smoke.py --data data/sample-pack
 ./target/release/dict-bench --data data/english-pack --iterations 100
+python3 scripts/package.py --program-only --target RUST_TARGET --output dist/program
 python3 scripts/package.py --pack data/english-pack --target RUST_TARGET --output dist/release
 ```
+
+`make build` removes the selected Cargo build directory before every build,
+including old versions and cached dependencies. It rebuilds all three release
+programs with locked dependencies, so it takes longer than incremental builds.
+For an incremental build, run `cargo build --locked --release --bins` directly.
+`make clean` respects `CARGO_TARGET_DIR`; `make clean-all` additionally deletes
+local verification logs, extracted packages, and release archives in `artifacts/`
+and `dist/`. Neither command removes source/prepared data or installed dictionaries.
+CI uses Cargo directly so it can reuse compilation caches.
 
 Benchmarks distinguish first application-cache reads, warm lookup/preview time,
 and asynchronous input-to-TestBackend render time at 120×40. They also report
@@ -487,10 +498,20 @@ method with results. Small-sample results
 do not establish full-pack performance. See [PERFORMANCE.md](PERFORMANCE.md)
 for the full-data verification.
 
-CI checks source on macOS and Linux. Pushing a `v*` tag whose version matches
-Cargo.toml triggers four native release builds, program plus separate full-dictionary smoke checks,
-and automatic GitHub Release publication after every target passes. Manual
-workflow dispatch builds and verifies the packages without publishing.
+CI runs on main-branch pushes and pull requests, with superseded runs cancelled.
+Formatting and Python tests run once; Rust lint/tests and sample-dictionary
+terminal checks run on macOS and Linux. A separate job compiles all targets with
+Rust 1.88. Ordinary checks use debug programs and do not upload release binaries.
+
+Version tags run an early metadata/source/MSRV gate before four native release
+builds. Each platform checks its Rust targets, runtime dependencies, and packaged
+terminal behavior with the sample dictionary, then uploads only the program
+archive and checksum. The assembly job downloads the pinned full dictionary
+once, verifies its archive and every entry using the Linux x86_64 release program,
+and checks full-data previews from an unrelated directory. It publishes four
+program archives, the shared dictionary, and combined checksums only after all
+gates pass. Same-ref release runs are serialized; published versions are left
+unchanged. Manual dispatch performs the same verification without publishing.
 
 `data-release.json` pins the dictionary Release tag, asset, and SHA-256.
 Release builds reuse that archive; they do not download and rebuild a moving

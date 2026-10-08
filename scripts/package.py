@@ -81,10 +81,77 @@ def validate_data_archive(path):
     return manifest
 
 
+RELEASE_TARGETS = (
+    "aarch64-apple-darwin", "x86_64-apple-darwin",
+    "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
+)
+
+
+def assemble_programs(artifacts, output, version):
+    """Verify exactly four program receipts before collecting any archives."""
+    expected = {f"wordglide-v{version}-{target}.tar.gz" for target in RELEASE_TARGETS}
+    verified = {}
+    for receipt in artifacts.rglob("SHA256SUMS.txt"):
+        lines = receipt.read_text().splitlines()
+        if len(lines) != 1:
+            raise ValueError("Each platform must provide exactly one program checksum")
+        parts = lines[0].split("  ")
+        if len(parts) != 2:
+            raise ValueError("Invalid program checksum receipt")
+        digest, name = parts
+        if name not in expected or name in verified or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise ValueError("Unexpected or duplicate program asset")
+        archive = receipt.parent / name
+        if checksum(archive) != digest:
+            raise ValueError(f"Program checksum mismatch: {name}")
+        with tarfile.open(archive, "r|gz") as tar:
+            seen = set()
+            members = {"wordglide/wordglide", *("wordglide/" + doc for doc in DOCS)}
+            for member in tar:
+                if not member.isfile() or member.name not in members or member.name in seen:
+                    raise ValueError("Unexpected or unsafe program archive member")
+                if member.uid or member.gid or member.uname or member.gname or member.mtime or member.pax_headers:
+                    raise ValueError("Program archive includes nonportable filesystem metadata")
+                required_mode = 0o755 if member.name == "wordglide/wordglide" else 0o644
+                if member.mode != required_mode:
+                    raise ValueError("Invalid program archive permissions")
+                seen.add(member.name)
+            if seen != members:
+                raise ValueError("Incomplete program archive")
+        verified[name] = archive
+    if set(verified) != expected:
+        raise ValueError("Expected all four platform programs")
+    output.mkdir(parents=True, exist_ok=False)
+    for name, archive in verified.items():
+        shutil.copyfile(archive, output / name)
+
+
+def release_notes(tag, manifest):
+    source = manifest["source"]
+    snapshot = source.get("snapshot", "unknown")
+    description = source.get("source", "English Wiktionary via Kaikki/Wiktextract")
+    return (
+        f"# Wordglide {tag}\n\n"
+        "Download the program archive for your platform, extract it, and run `./wordglide/wordglide`. "
+        "Use F2 Settings or `./wordglide/wordglide --download-data` to install the latest dictionary. "
+        "Installed lookup stays offline.\n\n"
+        "The shared `english-pack.tar.gz` is also provided for manual installation. "
+        "Extract it into the program directory so `english-pack/` sits beside the executable. "
+        "Verify downloads with `SHA256SUMS.txt`.\n\n"
+        "Supports macOS 11+ (Intel/ARM64) and Linux (x86_64/ARM64, static musl executables).\n\n"
+        f"Dictionary: {description}; snapshot {snapshot}; "
+        f"{manifest['candidate_count']:,} entries; schema {manifest['schema_version']}. "
+        "Old formats must be replaced. Run `wordglide --verify-data` for full verification.\n\n"
+        "Code is MIT. Dictionary and frequency data retain their original licenses; "
+        "see THIRD_PARTY.md in the program and dictionary archives.\n"
+    )
+
+
 def main():
     root = Path(__file__).resolve().parent.parent
     p = argparse.ArgumentParser(description=__doc__)
     data = p.add_mutually_exclusive_group(required=True)
+    data.add_argument("--program-only", action="store_true", help="Package only the program, without dictionary inputs")
     data.add_argument("--pack", type=Path, help="Unpacked canonical data directory")
     data.add_argument("--data-archive", type=Path, help="Pinned, portable data archive")
     p.add_argument("--target", required=True, help="Rust target triple")
@@ -106,7 +173,7 @@ def main():
                 raise ValueError(f"Corrupt file: {name}")
             if (args.pack / name).stat().st_size != manifest.get("sizes", {}).get(name):
                 raise ValueError(f"Corrupt file length: {name}")
-    else:
+    elif args.data_archive:
         validate_data_archive(args.data_archive)
     args.output.mkdir(parents=True, exist_ok=False)
     archive = args.output / "english-pack.tar.gz"
@@ -116,7 +183,7 @@ def main():
                 tar.add(args.pack / name, arcname="english-pack/" + name, filter=portable_metadata)
             tar.add(root / "THIRD_PARTY.md", arcname="english-pack/THIRD_PARTY.md", filter=portable_metadata)
         validate_data_archive(archive)
-    else:
+    elif args.data_archive:
         shutil.copyfile(args.data_archive, archive)
     stem = f"wordglide-v{args.version}-{args.target}"
     with archive_writer(args.output / (stem + ".tar.gz")) as tar:

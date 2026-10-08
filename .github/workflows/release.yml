@@ -5,8 +5,71 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      data_tag: ${{ steps.metadata.outputs.data_tag }}
+      data_asset: ${{ steps.metadata.outputs.data_asset }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - name: Validate release metadata before compiling
+        id: metadata
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
+          if os.environ['REF_TYPE'] == 'tag' and os.environ['REF_NAME'] != 'v' + version:
+              raise SystemExit('Release tag must match Cargo.toml version')
+          data = json.loads(Path('data-release.json').read_text())
+          if (data['schema_version'] != 3 or data['asset'] != 'english-pack.tar.gz'
+                  or not re.fullmatch(r'[A-Za-z0-9._-]+', data['tag'])
+                  or not re.fullmatch(r'[0-9a-f]{64}', data['sha256'])):
+              raise SystemExit('Invalid pinned dictionary configuration')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('version=' + version + '\ndata_tag=' + data['tag'] + '\ndata_asset=' + data['asset'] + '\n')
+          PY
+      - name: Check that the pinned dictionary asset exists
+        env:
+          DATA_TAG: ${{ steps.metadata.outputs.data_tag }}
+          DATA_ASSET: ${{ steps.metadata.outputs.data_asset }}
+        run: |
+          gh release view "$DATA_TAG" --json isDraft,assets > data-metadata.json
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          release = json.loads(Path('data-metadata.json').read_text())
+          assets = [a for a in release['assets'] if a['name'] == os.environ['DATA_ASSET']]
+          if release['isDraft'] or len(assets) != 1 or assets[0]['size'] <= 0:
+              raise SystemExit('Pinned dictionary must be a published nonempty asset')
+          PY
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - run: echo 'RUSTUP_TOOLCHAIN=1.88.0' >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - run: cargo check --locked --all-targets
   build:
+    needs: preflight
     strategy:
       fail-fast: false
       matrix:
@@ -22,15 +85,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       TARGET: ${{ matrix.target }}
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.preflight.outputs.version }}
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
           targets: ${{ matrix.target }}
-          components: rustfmt, clippy
+          components: clippy
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
@@ -46,62 +108,31 @@ jobs:
             echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
             echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc' >> "$GITHUB_ENV"
           fi
-      - name: Check all owned targets
-        shell: bash
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Check all Rust targets
         run: |
-          cargo fmt --all -- --check
           cargo clippy --locked --all-targets --target "$TARGET" -- -D warnings
           cargo test --locked --all-targets --target "$TARGET"
           cargo test --locked --doc --target "$TARGET"
-          python3 -m unittest discover -s scripts -p 'test_*.py' -v
-      - name: Build release executable
-        shell: bash
-        run: cargo build --locked --release --bins --target "$TARGET"
-      - name: Verify version and retrieve pinned dictionary
-        shell: bash
-        env:
-          REF_NAME: ${{ github.ref_name }}
-          REF_TYPE: ${{ github.ref_type }}
+      - name: Build release program and sample dictionary
         run: |
-          python3 - <<'PY'
-          import json, os, tomllib
-          from pathlib import Path
-          version = tomllib.loads(Path('Cargo.toml').read_text())['package']['version']
-          if os.environ['REF_TYPE'] == 'tag' and os.environ['REF_NAME'] != 'v' + version:
-              raise SystemExit('Release tag must match Cargo.toml version')
-          data = json.loads(Path('data-release.json').read_text())
-          assert data['schema_version'] == 3, 'Release requires a pinned schema 3 dictionary'
-          with open(os.environ['GITHUB_ENV'], 'a') as f:
-              f.write('DATA_TAG=' + data['tag'] + '\nDATA_ASSET=' + data['asset'] + '\n')
-          PY
-      - name: Retrieve pinned dictionary
-        shell: bash
+          cargo build --locked --release --bin wordglide --bin dict-build --target "$TARGET"
+          "target/$TARGET/release/dict-build" --input examples/sample/entries.jsonl --source examples/sample/source.json --output data/ci-sample
+          "target/$TARGET/release/wordglide" --data data/ci-sample --verify-data
+      - name: Package only the program
         run: |
-          gh release download "$DATA_TAG" --pattern "$DATA_ASSET" --dir artifacts/data
-          python3 - <<'PY'
-          import json, sys
-          from pathlib import Path
-          sys.path.insert(0, 'scripts')
-          from package import checksum
-          data = json.loads(Path('data-release.json').read_text())
-          assert checksum(Path('artifacts/data') / data['asset']) == data['sha256'], 'Dictionary checksum mismatch'
-          PY
-      - name: Package program and shared dictionary
-        shell: bash
-        run: |
-          python3 scripts/package.py --data-archive artifacts/data/english-pack.tar.gz --binaries "target/$TARGET/release" --target "$TARGET" --output dist/release
-      - name: Verify program with separate full dictionary
-        shell: bash
-        run: |
+          python3 scripts/package.py --program-only --binaries "target/$TARGET/release" --target "$TARGET" --version "$VERSION" --output dist/release
           mkdir -p artifacts/unpacked
-          tar -xzf "dist/release/wordglide-v$(target/$TARGET/release/wordglide --version | cut -d' ' -f2)-$TARGET.tar.gz" -C artifacts/unpacked
-          tar -xzf dist/release/english-pack.tar.gz -C artifacts/unpacked/wordglide
-          artifacts/unpacked/wordglide/wordglide --verify-data
-          python3 scripts/terminal_no_data_smoke.py --binary artifacts/unpacked/wordglide/wordglide
-          dict_repo_root="$PWD"
-          cd "$(mktemp -d)"
-          python3 "$dict_repo_root/scripts/terminal_smoke.py" --binary "$dict_repo_root/artifacts/unpacked/wordglide/wordglide"
-          python3 "$dict_repo_root/scripts/terminal_smoke.py" --binary "$dict_repo_root/artifacts/unpacked/wordglide/wordglide" --query went --needle '(word form)'
+          tar -xzf "dist/release/wordglide-v$VERSION-$TARGET.tar.gz" -C artifacts/unpacked
+      - name: Check packaged terminal behavior
+        run: |
+          binary="$PWD/artifacts/unpacked/wordglide/wordglide"
+          python3 scripts/terminal_no_data_smoke.py --binary "$binary"
+          python3 scripts/terminal_smoke.py --binary "$binary" --data data/ci-sample
+          python3 scripts/terminal_interaction_smoke.py --binary "$binary" --data data/ci-sample
+          python3 scripts/terminal_appearance_smoke.py --binary "$binary" --data data/ci-sample
       - name: Verify runtime dependencies
         shell: bash
         run: |
@@ -126,63 +157,73 @@ jobs:
           retention-days: 7
           compression-level: 0
   publish:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [preflight, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      TAG: ${{ github.ref_name }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+      DATA_TAG: ${{ needs.preflight.outputs.data_tag }}
+      DATA_ASSET: ${{ needs.preflight.outputs.data_asset }}
+      TAG: v${{ needs.preflight.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
       - uses: actions/download-artifact@v7
         with:
           pattern: release-*
           path: artifacts/assets
-      - name: Collect and verify release assets
+      - name: Collect verified program packages
         run: |
           python3 - <<'PY'
-          import os, shutil, sys
+          import os, sys
           from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from package import assemble_programs
+          assemble_programs(Path('artifacts/assets'), Path('dist/release'), os.environ['VERSION'])
+          PY
+      - name: Download and validate the shared dictionary once
+        run: |
+          gh release download "$DATA_TAG" --pattern "$DATA_ASSET" --dir dist/release
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from package import checksum, validate_data_archive, release_notes
+          data = json.loads(Path('data-release.json').read_text())
+          archive = Path('dist/release') / data['asset']
+          assert checksum(archive) == data['sha256'], 'Dictionary checksum mismatch'
+          manifest = validate_data_archive(archive)
+          Path('artifacts/notes.md').write_text(release_notes(os.environ['TAG'], manifest))
+          PY
+      - name: Verify full dictionary with the published Linux program
+        run: |
+          mkdir -p artifacts/unpacked
+          tar -xzf "dist/release/wordglide-v$VERSION-x86_64-unknown-linux-musl.tar.gz" -C artifacts/unpacked
+          tar -xzf dist/release/english-pack.tar.gz -C artifacts/unpacked/wordglide
+          artifacts/unpacked/wordglide/wordglide --verify-data
+          dict_repo_root="$PWD"
+          cd "$(mktemp -d)"
+          python3 "$dict_repo_root/scripts/terminal_smoke.py" --binary "$dict_repo_root/artifacts/unpacked/wordglide/wordglide"
+          python3 "$dict_repo_root/scripts/terminal_smoke.py" --binary "$dict_repo_root/artifacts/unpacked/wordglide/wordglide" --query went --needle '(word form)'
+      - name: Generate the combined checksum receipt
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
           sys.path.insert(0, 'scripts')
           from package import checksum
           output = Path('dist/release')
-          output.mkdir(parents=True)
-          for receipt in Path('artifacts/assets').rglob('SHA256SUMS.txt'):
-              for line in receipt.read_text().splitlines():
-                  expected, name = line.split('  ')
-                  source = receipt.parent / name
-                  assert checksum(source) == expected, name
-                  destination = output / name
-                  if destination.exists():
-                      assert checksum(destination) == expected, 'Conflicting duplicate data archive'
-                  else:
-                      shutil.copyfile(source, destination)
           assets = sorted(output.glob('*.tar.gz'))
-          assert len(assets) == 5, 'Expected four program packages and one dictionary'
-          assert not any('with-data' in p.name for p in assets), 'Combined bundles are no longer published'
+          assert len(assets) == 5, 'Expected four programs and one dictionary'
           (output / 'SHA256SUMS.txt').write_text(''.join(checksum(p) + '  ' + p.name + '\n' for p in assets))
-          Path('artifacts/notes.md').write_text(
-              '# Wordglide ' + os.environ['TAG'] + '\n\n'
-              'Download the program archive for your platform, extract it, and run `./wordglide/wordglide`. '
-              'Use F2 Settings to download the latest dictionary, or run `./wordglide/wordglide --download-data`. Lookup stays offline after installation.\n\n'
-              'The shared `english-pack.tar.gz` is also provided for manual offline installation. '
-              'Extract the dictionary into the program directory so `english-pack/` sits beside the executable.\n\n'
-              'Supports macOS 11+ (Intel/ARM64) and Linux (x86_64/ARM64, static musl executables). '
-              'Verify downloads with `SHA256SUMS.txt`.\n\n'
-              'Uses the schema 3 dictionary pack with candidate parts of speech and compressed definitions. '
-              'Normal startup performs lightweight checks; run `wordglide --verify-data` '
-              'for full checksum, index, and database verification without opening the TUI. '
-              'Old dictionary packs must be replaced.\n\n'
-              'Type for immediate definition previews. Tab completes a common prefix and cycles candidates; '
-              'Shift+Tab reverses, Right/Ctrl+F accepts gray suggestions, Enter enters reading, and Esc returns.\n\n'
-              'Dictionary snapshot: English Wiktionary via Kaikki/Wiktextract, 2026-09-02, '
-              '1,355,084 entries. Code is MIT; dictionary and frequency data keep their original licenses '
-              'and notices in the pack and THIRD_PARTY.md.\n')
           PY
       - name: Publish complete release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           if gh release view "$TAG" --json isDraft --jq '.isDraft' > artifacts/is-draft; then

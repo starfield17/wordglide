@@ -57,8 +57,9 @@ filled definition cache. That cache has a separate 32 MiB budget.
 
 The CI matrix is configured to check macOS and Linux. Release validation builds
 Intel/ARM64 macOS and x86_64/ARM64 Linux packages, checks runtime dependencies,
-and exercises program archives with the separate full dictionary from an unrelated working directory without
-a dictionary path argument. This local schema-3 run validates the native macOS
+and exercises packaged programs with the sample dictionary on each platform.
+Release assembly verifies the separate full dictionary once with the Linux
+x86_64 program and checks automatic discovery from an unrelated directory. This local schema-3 run validates the native macOS
 target; the other three release targets require CI and were not executed locally.
 Windows is not a target.
 

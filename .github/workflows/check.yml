@@ -1,8 +1,42 @@
 name: Check
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: rustfmt
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: cargo fmt --all -- --check
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py' -v
+  msrv:
+    env:
+      RUSTUP_TOOLCHAIN: 1.88.0
+    needs: source
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - run: cargo check --locked --all-targets
   check:
+    needs: source
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
@@ -10,23 +44,24 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
-          components: rustfmt, clippy
+          components: clippy
       - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
-      - run: make check PYTHON=python3
-      - name: Build release executables
-        shell: bash
-        run: |
-          dict_sysroot="$(rustc --print sysroot)"
-          RUSTFLAGS="--remap-path-prefix=$HOME=dependencies --remap-path-prefix=$PWD=workspace --remap-path-prefix=$dict_sysroot=toolchain" cargo build --release --bins
-      - run: |
-          ./target/release/dict-build --input examples/sample/entries.jsonl --source examples/sample/source.json --output data/ci-sample
-          python3 scripts/terminal_smoke.py --data data/ci-sample
-      - uses: actions/upload-artifact@v7
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: dict-${{ matrix.os }}
-          path: |
-            target/release/wordglide
-            target/release/dict-build
-            target/release/dict-bench
+          key: check-${{ matrix.os }}
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked --all-targets
+      - run: cargo test --locked --doc
+      - name: Build debug executables and sample dictionary
+        run: |
+          cargo build --locked --bins
+          target/debug/dict-build --input examples/sample/entries.jsonl --source examples/sample/source.json --output data/ci-sample
+          target/debug/wordglide --data data/ci-sample --verify-data
+      - name: Check terminal behavior
+        run: |
+          python3 scripts/terminal_no_data_smoke.py --binary target/debug/wordglide
+          python3 scripts/terminal_smoke.py --binary target/debug/wordglide --data data/ci-sample
+          python3 scripts/terminal_interaction_smoke.py --binary target/debug/wordglide --data data/ci-sample
+          python3 scripts/terminal_appearance_smoke.py --binary target/debug/wordglide --data data/ci-sample
