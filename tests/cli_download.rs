@@ -19,15 +19,21 @@ fn download_flag_conflicts_with_lookup_and_explicit_data_operations() {
 }
 
 #[test]
-fn missing_data_explains_the_explicit_download_command() {
+fn missing_data_metadata_and_verification_remain_strict_and_explain_download() {
     let root = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wordglide"))
-        .args(["--data", root.path().join("absent").to_str().unwrap()])
-        .env_remove("WORDGLIDE_DATA")
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("wordglide --download-data"));
+    for operation in ["--info", "--verify-data"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_wordglide"))
+            .args([
+                operation,
+                "--data",
+                root.path().join("absent").to_str().unwrap(),
+            ])
+            .env_remove("WORDGLIDE_DATA")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("wordglide --download-data"));
+    }
 }
 
 #[test]

@@ -1,5 +1,47 @@
 import unittest
-from prepare import extract, normalize
+import json
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from prepare import extract, normalize, hyphen_penalty, ranking_score, rerank_prepared, OLD_POLICY, POLICY
+
+
+class RankingTests(unittest.TestCase):
+    def test_fixed_hyphen_penalty_and_normalization(self):
+        self.assertEqual(hyphen_penalty("mother-in-law"), 300)
+        self.assertEqual(hyphen_penalty(normalize("house\u2011like")), 150)
+        self.assertEqual(hyphen_penalty("well\u2010known"), 150)
+        self.assertEqual(hyphen_penalty("take off"), 0)
+        self.assertEqual(hyphen_penalty("don't"), 0)
+        self.assertEqual(hyphen_penalty("x–y"), 0)
+        self.assertGreater(ranking_score("home", 5.81), ranking_score("how-to", 6.21))
+        self.assertGreater(ranking_score("household", 4.47), ranking_score("house-like", 5.63))
+        self.assertEqual(ranking_score("house-like", 5.63), 393)
+
+    def test_reranking_preserves_source_fields_and_is_not_applied_twice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / "original"
+            original.mkdir()
+            entry = {"key":"house-like", "headword":"house-like", "score":543,
+                     "groups":[{"pos":"adj", "senses":[{"glosses":["source text"]}]}]}
+            (original / "entries.jsonl").write_text(json.dumps(entry) + "\n")
+            (original / "source.json").write_text(json.dumps({"ranking":OLD_POLICY, "snapshot":"test",
+                                                             "quality_report":{"entries":1}}))
+            rerank_prepared(SimpleNamespace(prepared=original, output=root / "new"))
+            new = json.loads((root / "new/entries.jsonl").read_text())
+            self.assertEqual(new.pop("score"), 393)
+            entry.pop("score")
+            self.assertEqual(new, entry)
+            source = json.loads((root / "new/source.json").read_text())
+            self.assertEqual(source["ranking"], POLICY)
+            self.assertEqual(source["snapshot"], "test")
+            rerank_prepared(SimpleNamespace(prepared=root / "new", output=root / "again"))
+            self.assertEqual((root / "again/entries.jsonl").read_bytes(), (root / "new/entries.jsonl").read_bytes())
+            source["ranking"] = "unknown"
+            (root / "new/source.json").write_text(json.dumps(source))
+            with self.assertRaises(ValueError):
+                rerank_prepared(SimpleNamespace(prepared=root / "new", output=root / "bad"))
 
 
 class ExtractTests(unittest.TestCase):

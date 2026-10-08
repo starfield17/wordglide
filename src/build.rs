@@ -1,5 +1,5 @@
 use crate::model::{Entry, Manifest, RANKING, SCHEMA_VERSION};
-use crate::{Candidate, MatchKind, index::Index, normalize};
+use crate::{Candidate, MatchKind, entry_codec, index::Index, normalize};
 use anyhow::{Context, Result, ensure};
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
@@ -34,13 +34,20 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
     );
     let source: serde_json::Value = serde_json::from_slice(&fs::read(provenance)?)?;
     ensure!(source.is_object(), "Provenance must be a JSON object");
+    if let Some(ranking) = source.get("ranking") {
+        ensure!(
+            ranking.as_str() == Some(RANKING),
+            "Incompatible prepared ranking policy; re-prepare the data"
+        );
+    }
     fs::create_dir_all(output)?;
     let mut conn = Connection::open(output.join("entries.sqlite"))?;
-    conn.execute_batch("CREATE TABLE entries(key TEXT PRIMARY KEY, payload TEXT NOT NULL) WITHOUT ROWID; PRAGMA user_version=2;")?;
+    conn.execute_batch("CREATE TABLE entries(key TEXT PRIMARY KEY, raw_len INTEGER NOT NULL, payload BLOB NOT NULL) WITHOUT ROWID; PRAGMA user_version=3;")?;
     let tx = conn.transaction()?;
     let mut count = 0;
+    let mut words = Vec::new();
     {
-        let mut insert = tx.prepare("INSERT INTO entries(key,payload) VALUES(?1,?2)")?;
+        let mut insert = tx.prepare("INSERT INTO entries(key,raw_len,payload) VALUES(?1,?2,?3)")?;
         for (line_no, line) in BufReader::new(File::open(input)?).lines().enumerate() {
             let line = line?;
             if line.trim().is_empty() {
@@ -60,6 +67,7 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
             );
             ensure!(
                 entry.groups.iter().all(|g| !g.pos.is_empty()
+                    && !g.pos.chars().any(char::is_control)
                     && !g.senses.is_empty()
                     && g.senses.iter().all(|s| !s.glosses.is_empty()
                         && s.glosses.iter().all(|text| !text.trim().is_empty())
@@ -68,27 +76,28 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
                 "Invalid senses at line {}",
                 line_no + 1
             );
+            let parts_of_speech = entry.parts_of_speech();
+            let (raw_len, payload) = entry_codec::encode(&entry)?;
             insert
-                .execute(params![entry.key, serde_json::to_string(&entry)?])
+                .execute(params![entry.key, raw_len as i64, payload])
                 .with_context(|| format!("Duplicate/invalid entry on line {}", line_no + 1))?;
+            words.push(Candidate {
+                key: entry.key,
+                headword: entry.headword,
+                score: entry.score,
+                kind: MatchKind::Prefix,
+                parts_of_speech,
+            });
             count += 1;
         }
     }
     ensure!(count > 0, "No entries were supplied");
     tx.commit()?;
-    let mut stmt = conn.prepare("SELECT payload FROM entries ORDER BY key COLLATE BINARY")?;
-    let mut rows = stmt.query([])?;
-    let mut words = Vec::with_capacity(count);
+    drop(conn);
+    words.sort_by(|a, b| a.key.cmp(&b.key));
     let mut builder = fst::MapBuilder::new(File::create(output.join("words.fst"))?)?;
-    while let Some(row) = rows.next()? {
-        let entry: Entry = serde_json::from_str(&row.get::<_, String>(0)?)?;
-        builder.insert(&entry.key, words.len() as u64)?;
-        words.push(Candidate {
-            key: entry.key,
-            headword: entry.headword,
-            score: entry.score,
-            kind: MatchKind::Prefix,
-        });
+    for (i, word) in words.iter().enumerate() {
+        builder.insert(&word.key, i as u64)?;
     }
     builder.finish()?;
     let data = Index::encode(&words)?;

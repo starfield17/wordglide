@@ -11,6 +11,7 @@ import subprocess
 import sys
 import termios
 import time
+from terminal_interaction_smoke import screen_text
 
 
 def main():
@@ -50,10 +51,12 @@ def main():
             raise AssertionError("All-motion mouse tracking should not be enabled")
         os.write(master, args.query.encode("utf-8"))
         deadline = time.monotonic() + 5
-        needle = args.needle.encode("utf-8")
-        while needle not in output and time.monotonic() < deadline:
+        # Ratatui sends differential frames: a visible phrase can be split
+        # across writes or retained cells and never occur in raw ANSI bytes.
+        while args.needle not in screen_text(output) and time.monotonic() < deadline:
             drain(0.05)
-        if args.query.encode("utf-8") not in output or needle not in output:
+        visible = screen_text(output)
+        if args.query not in visible or args.needle not in visible:
             raise AssertionError("Typing did not produce the expected automatic definition preview")
         os.write(master, b"\x03")
         process.wait(timeout=5)

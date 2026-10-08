@@ -1,4 +1,4 @@
-use crate::{App, Focus, MatchKind};
+use crate::{App, Candidate, Focus, MatchKind};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -12,6 +12,52 @@ use unicode_width::UnicodeWidthStr;
 use super::pointer::{Pointer, Region};
 use super::reading::{label_line, prepare_reading, reading_lines, stale_style, styled_rows, wrap};
 
+fn parts_summary(candidate: &Candidate, budget: usize) -> String {
+    let budget = budget.min(10);
+    let labels: Vec<_> = candidate
+        .parts_of_speech
+        .iter()
+        .map(|p| match p.as_str() {
+            "noun" => "n.",
+            "verb" => "v.",
+            "adj" => "adj.",
+            "adv" => "adv.",
+            "name" => "prop.n.",
+            "pron" => "pron.",
+            "prep" => "prep.",
+            "conj" => "conj.",
+            "intj" => "intj.",
+            "det" => "det.",
+            "num" => "num.",
+            other => other,
+        })
+        .collect();
+    let Some(first) = labels.first() else {
+        return String::new();
+    };
+    let mut text = labels.iter().take(2).copied().collect::<Vec<_>>().join("/");
+    if labels.len() > 2 {
+        text.push_str("/…");
+    }
+    if text.width() + 2 > budget {
+        text = (*first).to_string();
+        if labels.len() > 1 {
+            text.push_str("/…");
+        }
+    }
+    if text.width() + 2 > budget {
+        text = (*first).to_string();
+        if labels.len() > 1 {
+            text.push('…');
+        }
+    }
+    if text.width() + 2 <= budget {
+        format!("  {text}")
+    } else {
+        String::new()
+    }
+}
+
 pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Pointer) {
     let items: Vec<_> = app
         .results
@@ -24,8 +70,9 @@ pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointe
                 MatchKind::Prefix => "",
             };
             let available = area.width.saturating_sub(4) as usize;
+            let parts = parts_summary(c, available.saturating_sub(marker.width() + 8));
             let mut text = String::new();
-            let max = available.saturating_sub(marker.width());
+            let max = available.saturating_sub(marker.width() + parts.width());
             for grapheme in c.headword.graphemes(true) {
                 if text.width() + grapheme.width()
                     > max.saturating_sub(usize::from(c.headword.width() > max))
@@ -54,6 +101,7 @@ pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointe
                 Span::styled(text[..prefix_end].to_string(), app.theme.heading()),
                 Span::raw(text[prefix_end..].to_string()),
                 Span::styled(marker, app.theme.dim()),
+                Span::styled(parts, app.theme.dim()),
             ]))
         })
         .collect();
@@ -204,4 +252,27 @@ pub(super) fn render_definition(
         })
         .collect();
     frame.render_widget(Paragraph::new(rendered), body);
+}
+
+#[cfg(test)]
+mod candidate_tests {
+    use super::*;
+
+    #[test]
+    fn narrow_summaries_never_hide_omitted_parts() {
+        let mut candidate = Candidate {
+            key: "example".into(),
+            headword: "example".into(),
+            score: 0,
+            kind: MatchKind::Exact,
+            parts_of_speech: vec!["adj".into(), "noun".into(), "verb".into()],
+        };
+        assert_eq!(parts_summary(&candidate, 6), "");
+        assert_eq!(parts_summary(&candidate, 7), "  adj.…");
+        assert_eq!(parts_summary(&candidate, 8), "  adj./…");
+        candidate.parts_of_speech = vec!["unfamiliar-label".into(), "verb".into()];
+        assert_eq!(parts_summary(&candidate, 8), "");
+        candidate.parts_of_speech = vec!["noun".into(), "verb".into()];
+        assert_eq!(parts_summary(&candidate, 7), "  n./v.");
+    }
 }

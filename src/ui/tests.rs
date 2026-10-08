@@ -465,6 +465,33 @@ fn candidate_row(pointer: &Pointer, index: usize) -> u16 {
     pointer.candidates.y + (index - pointer.candidates_offset) as u16
 }
 
+#[test]
+fn candidate_parts_are_compact_keep_word_space_and_do_not_change_click_rows() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "house");
+    settle(&mut app);
+    app.results[0].parts_of_speech = vec!["noun".into(), "unusual-label".into(), "verb".into()];
+    for width in [30, 60, 80, 120, 160] {
+        let mut terminal = Terminal::new(TestBackend::new(width, 24)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        let y = candidate_row(&pointer, 0);
+        let row: String = (pointer.candidates.x..pointer.candidates.x + pointer.candidates.width)
+            .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+            .collect();
+        assert!(
+            row.contains("house"),
+            "word must remain readable at {width}: {row}"
+        );
+        assert!(row.contains("n."), "first POS must fit at {width}: {row}");
+        assert!(row.contains('='), "match kind must survive at {width}");
+        assert_eq!(pointer.candidates_offset, 0);
+        assert!(click_candidate(&mut app, &pointer, 0));
+        assert_eq!(app.focus, Focus::Definition);
+        app.focus = Focus::Input;
+    }
+}
+
 fn click_candidate(app: &mut App, pointer: &Pointer, index: usize) -> bool {
     let column = pointer.candidates.x + 1;
     on_mouse(app, pointer, click(column, candidate_row(pointer, index)))
@@ -1004,6 +1031,7 @@ fn adaptive_candidate_pane_size_wide_120x40() {
             headword: "fist-fighting-champion-of-the-world".into(),
             score: 100,
             kind: crate::MatchKind::Exact,
+            parts_of_speech: vec!["verb".into()],
         });
     }
     let mut pointer_fist = Pointer::default();
@@ -1274,4 +1302,116 @@ fn unicode_styles_survive_controls_wrapping_and_hint_replacement() {
             .flat_map(|line| line.rendered().spans)
             .all(|span| span.style.add_modifier.contains(Modifier::DIM))
     );
+}
+
+#[test]
+fn missing_dictionary_keeps_settings_and_query_until_first_installation() {
+    let mut app = App::without_dictionary("ho", "fixture: missing pack".into());
+    app.download_enabled = true;
+    assert!(!app.loading);
+    assert!(!app.poll());
+    assert!(!app.contains("house"));
+    stroke(&mut app, KeyCode::Char('u'));
+    stroke(&mut app, KeyCode::Char('s'));
+    stroke(&mut app, KeyCode::Char('e'));
+    assert_eq!(app.input, "house");
+    assert!(!app.loading);
+    let mut terminal = Terminal::new(TestBackend::new(80, 30)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let notice = wrap(reading_lines(&app), 30);
+    assert!(notice.iter().any(|line| line.text.contains("F2")));
+    assert!(notice.iter().any(|line| line.text.contains("missing pack")));
+    stroke(&mut app, KeyCode::F(2));
+    for _ in 0..6 {
+        stroke(&mut app, KeyCode::Down);
+    }
+    stroke(&mut app, KeyCode::Enter);
+    assert!(app.download_requested);
+    assert_eq!(app.view.overlay, Overlay::Download);
+    stroke(&mut app, KeyCode::Esc);
+    assert!(app.download_cancelled);
+    assert_eq!(app.input, "house");
+    let preferences = app.reading_preferences();
+    let appearance = app.appearance();
+    let (_dir, first_dictionary) = dictionary();
+    assert!(app.activate_dictionary(first_dictionary));
+    assert!(app.dictionary_notice.is_none());
+    assert_eq!(app.input, "house");
+    assert_eq!(app.appearance(), appearance);
+    assert_eq!(app.reading_preferences(), preferences);
+    settle(&mut app);
+    assert!(!app.results.is_empty());
+    assert_eq!(app.results[0].key, "house");
+    let before = app.preview.as_ref().unwrap().entry.clone();
+    let (_other, another_dictionary) = dictionary();
+    assert!(!app.activate_dictionary(another_dictionary));
+    assert!(std::sync::Arc::ptr_eq(
+        &app.preview.as_ref().unwrap().entry,
+        &before
+    ));
+    assert!(!app.loading);
+}
+
+#[test]
+fn download_completion_opens_first_pack_and_keeps_active_reading_session() {
+    let (dir, _dictionary) = dictionary();
+    let installed = crate::download::Installed {
+        path: dir.path().join("pack"),
+        snapshot: "fixture".into(),
+        already_current: false,
+    };
+    let mut app = App::without_dictionary("fist", "missing".into());
+    app.download.running = true;
+    terminal::finish_download(&mut app, Err("cancelled".into()));
+    assert!(!app.has_dictionary());
+    assert!(!app.download.running);
+    assert!(app.download.message.contains("retry"));
+    terminal::finish_download(
+        &mut app,
+        Ok(crate::download::Installed {
+            path: dir.path().join("absent"),
+            ..installed.clone()
+        }),
+    );
+    assert!(!app.has_dictionary());
+    assert!(
+        app.download
+            .message
+            .contains("Cannot open installed dictionary")
+    );
+    terminal::finish_download(&mut app, Ok(installed.clone()));
+    assert!(app.has_dictionary());
+    assert!(app.download.message.contains("Dictionary ready"));
+    settle(&mut app);
+    app.jump_to("hand");
+    settle(&mut app);
+    app.scroll = 3;
+    let preview = app.preview.as_ref().unwrap().entry.clone();
+    let before = (
+        app.input.clone(),
+        app.cursor,
+        app.selected,
+        app.scroll,
+        app.focus,
+        app.history_len(),
+    );
+    terminal::finish_download(&mut app, Ok(installed));
+    assert_eq!(
+        (
+            app.input.clone(),
+            app.cursor,
+            app.selected,
+            app.scroll,
+            app.focus,
+            app.history_len()
+        ),
+        before
+    );
+    assert!(std::sync::Arc::ptr_eq(
+        &preview,
+        &app.preview.as_ref().unwrap().entry
+    ));
+    assert!(!app.loading);
+    assert!(app.download.message.contains("Restart"));
 }

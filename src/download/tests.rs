@@ -366,3 +366,39 @@ fn rejects_tar_extension_records_even_when_the_resolved_path_is_whitelisted() {
     assert!(run(root.path(), &server.source).is_err());
     assert!(!root.path().join("current.json").exists());
 }
+
+#[test]
+fn damaged_receipt_can_be_repaired_without_losing_it_on_failure_or_cancellation() {
+    let fixture = pack();
+    let server = Server::new(archive(&fixture.path().join("pack"), None));
+    for damaged in [
+        b"invalid json".to_vec(),
+        serde_json::to_vec(&serde_json::json!({
+            "directory":"../../outside", "archive_sha256":"0".repeat(64),
+            "release":"v1", "snapshot":"x"
+        }))
+        .unwrap(),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let receipt = root.path().join("current.json");
+        fs::write(&receipt, &damaged).unwrap();
+        assert!(locate(root.path()).is_err());
+        let broken = Server::new(b"corrupt archive".to_vec());
+        assert!(run(root.path(), &broken.source).is_err());
+        assert_eq!(fs::read(&receipt).unwrap(), damaged);
+        let cancel = AtomicBool::new(false);
+        assert!(
+            install(root.path(), &server.source, &cancel, |update| {
+                if matches!(update, Progress::Bytes { .. }) {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            })
+            .is_err()
+        );
+        assert_eq!(fs::read(&receipt).unwrap(), damaged);
+        let installed = run(root.path(), &server.source).unwrap();
+        assert!(!installed.already_current);
+        assert_eq!(locate(root.path()).unwrap(), Some(installed.path.clone()));
+        assert_eq!(crate::verify_pack(&installed.path).unwrap(), 89);
+    }
+}

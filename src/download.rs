@@ -368,7 +368,9 @@ fn install(
         MAX_METADATA,
         cancel,
     )?)?;
-    if let Some(receipt) = read_receipt(root)? {
+    // A damaged receipt cannot qualify for reuse, but must not block repair.
+    // Keep its bytes until a fully verified replacement is atomically activated.
+    if let Ok(Some(receipt)) = read_receipt(root) {
         let path = root.join(&receipt.directory).join("english-pack");
         if receipt.archive_sha256 == hash && Dictionary::open(&path).is_ok() {
             return Ok(Installed {

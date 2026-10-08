@@ -4,7 +4,7 @@ use directories::ProjectDirs;
 use std::path::{Path, PathBuf};
 use wordglide::{
     AppearanceOverrides, Dictionary, PackInfo, RunOptions, ThemePreset, download_data_with_cancel,
-    downloaded_data_path, pack_info, run_with_options, verify_pack,
+    downloaded_data_path, pack_info, run_with_options, run_without_dictionary, verify_pack,
 };
 
 #[derive(Parser)]
@@ -65,37 +65,40 @@ fn main() -> Result<()> {
         &executable,
         user_data,
         downloaded_data_path,
-    )?;
+    );
     if args.info {
+        let path = path?;
         print_pack_info(&path, &pack_info(&path)?);
         return Ok(());
     }
     if args.verify_data {
+        let path = path?;
         let started = std::time::Instant::now();
-        let entries = verify_pack(&path)?;
+        let entries = verify_pack(&path).with_context(|| format!(
+            "Cannot verify dictionary at {}. Run wordglide --download-data to install the latest compatible pack, or check --data / WORDGLIDE_DATA.", path.display()))?;
         println!(
             "Data pack verified: {entries} entries checked in {:.1}s",
             started.elapsed().as_secs_f64()
         );
         return Ok(());
     }
-    let dict = Dictionary::open(&path).with_context(|| format!(
-        "Cannot open dictionary at {}. Run `wordglide --download-data`, or select a prepared pack with --data / WORDGLIDE_DATA", path.display()))?;
-    let color = color_enabled(args.no_color);
-    run_with_options(
-        dict,
-        args.query.as_deref().unwrap_or(""),
-        RunOptions {
-            color,
-            mouse: !args.no_mouse,
-            appearance: AppearanceOverrides {
-                color_theme: args.theme,
-                theme_background: args.theme_background,
-                truecolor: args.truecolor,
-            },
-            config_path: project_dirs.map(|d| d.config_dir().join("config.json")),
+    let dictionary = path.and_then(|path| Dictionary::open(&path).with_context(|| format!(
+        "Cannot open dictionary at {}. Check --data / WORDGLIDE_DATA overrides if an older pack is selected.", path.display())));
+    let options = RunOptions {
+        color: color_enabled(args.no_color),
+        mouse: !args.no_mouse,
+        appearance: AppearanceOverrides {
+            color_theme: args.theme,
+            theme_background: args.theme_background,
+            truecolor: args.truecolor,
         },
-    )
+        config_path: project_dirs.map(|d| d.config_dir().join("config.json")),
+    };
+    let query = args.query.as_deref().unwrap_or("");
+    match dictionary {
+        Ok(dictionary) => run_with_options(dictionary, query, options),
+        Err(error) => run_without_dictionary(query, format!("{error:#}"), options),
+    }
 }
 
 fn color_enabled(no_color_flag: bool) -> bool {

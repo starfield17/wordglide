@@ -8,6 +8,11 @@ class TerminalScreenTests(unittest.TestCase):
         output = b"\x1b[1;1HSearch actions\x1b[1;1HMouse c\x1b[1;9Hp\x1b[1;11Hure"
         self.assertIn("Mouse capture", screen_text(output))
 
+    def test_definition_marker_split_by_terminal_frames_is_visible(self):
+        output = "\x1b[5;29Hwent → go (word \x1b[5;45Hform)".encode()
+        self.assertNotIn(b"(word form)", output)
+        self.assertIn("went → go (word form)", screen_text(output))
+
     def test_style_and_clear_do_not_become_content(self):
         output = b"old\x1b[2J\x1b[2;1H\x1b[31mReading layout: focus\x1b[0m"
         text = screen_text(output)

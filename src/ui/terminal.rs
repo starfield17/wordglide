@@ -181,9 +181,17 @@ impl Default for RunOptions {
 /// Load preferences before entering raw mode, then persist panel changes.
 /// Session overrides never write configuration merely by starting the program.
 pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions) -> Result<()> {
+    run_session(App::new(dictionary, query), options)
+}
+
+/// Open Settings and lookup input even when dictionary discovery or validation failed.
+pub fn run_without_dictionary(query: &str, notice: String, options: RunOptions) -> Result<()> {
+    run_session(App::without_dictionary(query, notice), options)
+}
+
+fn run_session(mut app: App, options: RunOptions) -> Result<()> {
     let (mut config, appearance) =
         ConfigStore::load(options.config_path.clone(), options.appearance)?;
-    let mut app = App::new(dictionary, query);
     app.download_enabled = crate::download::root().is_ok();
     app.set_color(options.color);
     app.mouse_enabled = options.mouse;
@@ -242,23 +250,7 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
                         app.download.total = total;
                     }
                     Progress::Finished(result) => {
-                        app.download.running = false;
-                        app.download.total = 0;
-                        app.download.message = match result {
-                            Ok(installed) => format!(
-                                "{} · snapshot {}\n{}\nRestart Wordglide to use this dictionary. --data and WORDGLIDE_DATA overrides still take precedence.",
-                                if installed.already_current {
-                                    "Already up to date"
-                                } else {
-                                    "Download complete"
-                                },
-                                installed.snapshot,
-                                installed.path.display()
-                            ),
-                            Err(error) => format!(
-                                "{error}\nCurrent dictionary was kept. Return to Settings to retry."
-                            ),
-                        };
+                        finish_download(&mut app, result);
                     }
                 }
                 dirty = true;
@@ -317,4 +309,42 @@ pub fn run_with_options(dictionary: Dictionary, query: &str, options: RunOptions
     }
     terminal.show_cursor()?;
     Ok(())
+}
+
+pub(super) fn finish_download(app: &mut App, result: Result<crate::download::Installed, String>) {
+    app.download.running = false;
+    app.download.total = 0;
+    app.download.message = match result {
+        Ok(installed) => {
+            let status = if app.has_dictionary() {
+                "Restart Wordglide to use this dictionary."
+            } else {
+                match Dictionary::open(&installed.path) {
+                    Ok(dictionary) => {
+                        app.activate_dictionary(dictionary);
+                        "Dictionary ready. Close this panel to start looking up words."
+                    }
+                    Err(error) => {
+                        app.download.message = format!(
+                            "Cannot open installed dictionary: {error:#}\nReturn to Settings to retry."
+                        );
+                        return;
+                    }
+                }
+            };
+            format!(
+                "{} · snapshot {}\n{}\n{status} --data and WORDGLIDE_DATA overrides still take precedence on restart.",
+                if installed.already_current {
+                    "Already up to date"
+                } else {
+                    "Download complete"
+                },
+                installed.snapshot,
+                installed.path.display()
+            )
+        }
+        Err(error) => {
+            format!("{error}\nReturn to Settings to retry. Any active dictionary was kept.")
+        }
+    };
 }

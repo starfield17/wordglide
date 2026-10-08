@@ -14,6 +14,7 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `src/lib.rs`: public contract; private modules enforce internal visibility.
 - `src/index.rs`: compact lexicon codec, prebuilt ranking, prefix top-k, fuzzy queries.
 - `src/store.rs`, `src/build.rs`: lightweight open, explicit full verification, pack assembly.
+- `src/entry_codec.rs`: bounded schema-3 zlib entry encoding/decoding, private to pack storage.
 - `src/app/`: navigation state, asynchronous result ownership, keys, completion, history, worker, fixed actions, source-addressed reading documents, and reading preferences.
 - `src/ui/`: rendering, reading layout, panes, help, action panels, and mouse hit-testing.
 - `src/theme.rs`: built-in palettes, appearance types, color roles, RGB-to-256 conversion.
@@ -21,10 +22,11 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `src/config.rs`: appearance-only configuration loading and atomic saving.
 - `src/ui/appearance.rs`: F2 Settings and dictionary download panels; terminal entry owns persistence.
 - `scripts/prepare.py`: raw Wiktextract validation/normalization and wordfreq scoring.
+- `scripts/terminal_no_data_smoke.py`: POSIX PTY missing/invalid-data startup and F2 recovery checks.
 - `scripts/terminal_smoke.py`: actual POSIX PTY input and terminal restoration check.
 - `scripts/terminal_interaction_smoke.py`: POSIX PTY reading navigation, menus, preferences, and mouse toggles.
 - `scripts/terminal_appearance_smoke.py`: PTY theme, save/retry, color-mode and restart checks.
-- `scripts/package.py`: validated program/data/bundle release archives.
+- `scripts/package.py`: validated program and shared-data release archives.
 - `.github/workflows/release.yml`: tag-triggered native builds and publication.
 - `data-release.json`: pinned dictionary Release asset and checksum; CI input only.
 - `tests/`: public API and real pack integration scenarios.

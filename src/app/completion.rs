@@ -84,7 +84,11 @@ impl App {
                 return;
             }
             let query = normalize(&self.input);
-            match self.lexicon.common_prefix(&query) {
+            match self
+                .lexicon
+                .as_ref()
+                .map_or(Ok(None), |lexicon| lexicon.common_prefix(&query))
+            {
                 Ok(Some(common)) if common.len() > query.len() => {
                     self.input = common;
                     self.cursor = self.input.len();

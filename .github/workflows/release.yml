@@ -70,6 +70,7 @@ jobs:
           if os.environ['REF_TYPE'] == 'tag' and os.environ['REF_NAME'] != 'v' + version:
               raise SystemExit('Release tag must match Cargo.toml version')
           data = json.loads(Path('data-release.json').read_text())
+          assert data['schema_version'] == 3, 'Release requires a pinned schema 3 dictionary'
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write('DATA_TAG=' + data['tag'] + '\nDATA_ASSET=' + data['asset'] + '\n')
           PY
@@ -85,16 +86,18 @@ jobs:
           data = json.loads(Path('data-release.json').read_text())
           assert checksum(Path('artifacts/data') / data['asset']) == data['sha256'], 'Dictionary checksum mismatch'
           PY
-      - name: Package all three download types
+      - name: Package program and shared dictionary
         shell: bash
         run: |
           python3 scripts/package.py --data-archive artifacts/data/english-pack.tar.gz --binaries "target/$TARGET/release" --target "$TARGET" --output dist/release
-      - name: Verify ready-to-run full-data bundle
+      - name: Verify program with separate full dictionary
         shell: bash
         run: |
           mkdir -p artifacts/unpacked
-          tar -xzf dist/release/*-with-data.tar.gz -C artifacts/unpacked
+          tar -xzf "dist/release/wordglide-v$(target/$TARGET/release/wordglide --version | cut -d' ' -f2)-$TARGET.tar.gz" -C artifacts/unpacked
+          tar -xzf dist/release/english-pack.tar.gz -C artifacts/unpacked/wordglide
           artifacts/unpacked/wordglide/wordglide --verify-data
+          python3 scripts/terminal_no_data_smoke.py --binary artifacts/unpacked/wordglide/wordglide
           dict_repo_root="$PWD"
           cd "$(mktemp -d)"
           python3 "$dict_repo_root/scripts/terminal_smoke.py" --binary "$dict_repo_root/artifacts/unpacked/wordglide/wordglide"
@@ -158,17 +161,18 @@ jobs:
                   else:
                       shutil.copyfile(source, destination)
           assets = sorted(output.glob('*.tar.gz'))
-          assert len(assets) == 9, 'Expected four program packages, four bundles, and one dictionary'
+          assert len(assets) == 5, 'Expected four program packages and one dictionary'
+          assert not any('with-data' in p.name for p in assets), 'Combined bundles are no longer published'
           (output / 'SHA256SUMS.txt').write_text(''.join(checksum(p) + '  ' + p.name + '\n' for p in assets))
           Path('artifacts/notes.md').write_text(
               '# Wordglide ' + os.environ['TAG'] + '\n\n'
-              'Download the **with-data** archive for your platform, extract it, and run `./wordglide/wordglide`. '
-              'No dictionary path configuration, Python, Rust, or network access is required to use it.\n\n'
-              'Program-only archives and the shared `english-pack.tar.gz` are also provided. '
+              'Download the program archive for your platform, extract it, and run `./wordglide/wordglide`. '
+              'Use F2 Settings to download the latest dictionary, or run `./wordglide/wordglide --download-data`. Lookup stays offline after installation.\n\n'
+              'The shared `english-pack.tar.gz` is also provided for manual offline installation. '
               'Extract the dictionary into the program directory so `english-pack/` sits beside the executable.\n\n'
               'Supports macOS 11+ (Intel/ARM64) and Linux (x86_64/ARM64, static musl executables). '
               'Verify downloads with `SHA256SUMS.txt`.\n\n'
-              'Uses the compact schema 2 dictionary pack with prebuilt ranking indexes. '
+              'Uses the schema 3 dictionary pack with candidate parts of speech and compressed definitions. '
               'Normal startup performs lightweight checks; run `wordglide --verify-data` '
               'for full checksum, index, and database verification without opening the TUI. '
               'Old dictionary packs must be replaced.\n\n'

@@ -15,7 +15,9 @@ no Enter to search. Startup loads only compact, prebuilt indexes. Warm-session i
 target <=50 ms, resident-memory target <=512 MiB on the full data pack.
 Decisions: Wiktionary via raw Wiktextract, prepared packs, fixed wordfreq baseline;
 up to 20 candidates; exact > valid inflection > prefix > one-edit fuzzy fallback.
-Base score: 100*Zipf - 2*character count - 100*extra whitespace-separated words.
+Base score: round(100*Zipf) - 2*character count - 100*extra whitespace-separated
+words - 150*hyphen count. Hyphens are U+002D and U+2010 in the normalized key;
+keys and query normalization are unchanged. Scores are fixed at preparation.
 Fuzzy: 3–64 query characters, insertion/deletion/substitution/adjacent swap.
 Completion: fish-style Tab common prefix then fixed top-20 cycling; Shift+Tab
 reverses; Esc restores original input; gray prefix suffix accepted with Right at
@@ -48,10 +50,15 @@ history back and forward.
 History: Ctrl+Z steps back through followed words and Ctrl+Y steps forward
 again. A new lookup or follow clears the forward steps so redo never restores a
 replaced state. History is session-only and capped in both directions.
-Distribution: public Wordglide repository; three download types (program, shared
-data, combined bundle). Explicit --data wins, then a non-empty WORDGLIDE_DATA,
+Distribution: public Wordglide repository; two download types (program and shared
+data). Explicit --data wins, then a non-empty WORDGLIDE_DATA,
 then a managed download, then adjacent english-pack auto-discovery, then the
-existing user-data directory. Normal startup and lookups never use the network.
+existing user-data directory. Missing, invalid, or incompatible dictionary data,
+including discovery/receipt errors, opens the terminal session with diagnostic
+and F2/CLI download guidance. Query editing and Settings work without a worker;
+no lookup is queued until a dictionary is active. Explicit path errors never
+silently fall back. --info and --verify-data remain strict non-TUI commands.
+Normal startup and lookups never use the network.
 Explicit --download-data conflicts with query, --data, --info, and --verify-data.
 It fetches metadata once from the fixed public GitHub latest release endpoint,
 then retrieves the archive and SHA256SUMS from that pinned release. Streamed
@@ -66,12 +73,18 @@ palette. Its modal owns keys, paste, and mouse; Esc cancels and Ctrl+C exits.
 It shows stage, target, byte progress, and success/error with return and retry.
 The CLI owns SIGINT handling; library download APIs use caller-owned cooperative
 cancellation without changing signal handlers. Existing RunOptions stays compatible.
-The lookup worker and active dictionary are untouched. Restart selects the new
-pack unless --data or WORDGLIDE_DATA overrides it.
-Validation: schema 2 only; normal open checks structure and file lengths, plus
+A first installation in a session without data opens the verified installed pack
+and starts lookup of the current query immediately, preserving appearance and
+reading preferences. Updates to an active dictionary leave its worker, query,
+history, and reading position untouched. Restart selects the new pack unless
+--data or WORDGLIDE_DATA overrides it. Failed/cancelled downloads leave Settings
+available for retry.
+Validation: schema 3 only; schema 2 is rejected with dictionary-update and
+--data/WORDGLIDE_DATA override guidance. Normal open checks structure and file lengths, plus
 the loaded FST buffer CRC. No default SHA scan, vocabulary traversal, or SQLite
 integrity scan. `wordglide --verify-data [--data DIRECTORY]` performs full
-verification, reports the entry count and elapsed time, and exits without TUI.
+verification including every compressed entry and entry/index score, headword,
+and POS agreement, reports the entry count and elapsed time, and exits without TUI.
 `wordglide --info` prints pack path, schema, entry count, source snapshot,
 provenance, and licenses.
 Reading: POS/IPA/senses, at most two source examples per sense, no generated
@@ -106,6 +119,12 @@ Action discovery: Ctrl+G/F3 opens a searchable fixed local-action menu. Disabled
 operations show a reason. Enter/click executes; Esc preserves the lookup. Only
 one overlay owns input, paste, and mouse at a time; queued completion waits for
 it to close. Help scrolls with arrows, page keys, Home/End, and the wheel.
+Candidate metadata includes sorted distinct original POS labels from every
+source group, stored as interned binary lists. Candidate rows show up to two
+abbreviated labels, then an ellipsis. At least eight columns remain for the
+headword where available; summaries shrink or disappear before match markers.
+Public Candidate.parts_of_speech is a Vec<String>; adding it breaks Rust struct
+literal construction in 0.4.0, while missing serialized fields default to empty.
 Wide candidate panes use 24% of terminal width clamped to 20–36 columns,
 independent of results. Candidate markers and the status line distinguish exact,
 prefix, word-form, and fuzzy matches; footer shortcuts are clickable. The menu
@@ -149,22 +168,22 @@ belongs to the terminal session, never the dictionary worker or data pack.
 
 ## Frame
 Compile source data to a local pack. Runtime indexes contain compact binary candidate metadata and prebuilt ranking;
-definition text is read only for the selected word and cached within a byte budget.
+definition text and necessary word-form targets are read on demand and cached within a byte budget.
+Schema 3 stores independent zlib-level-6 JSON BLOBs and raw_len in SQLite, never
+an unpacked definition file. Only build/prepare write data. Startup does not
+decompress entries. The private entry codec bounds raw entries to 1 MiB and
+compressed input to 2 MiB, checks stream completion/checksum, rejects tails,
+and checks raw length, JSON, and key. Parsed entries retain the 32 MiB cache
+budget charged against uncompressed size. Schema-3 installed pack size must
+be <=70% of schema 2 for the same source snapshot, alongside existing latency
+and memory targets.
 Oracle: compare indexed top-k with exhaustive fixed-score ranking in tests.
 Boundary check: compiler privacy/doc test; the installer copies verified prebuilt
 bytes and never calls the data generator.
 
 ## Found · Not doing
-- TODO: compressed dictionary storage with selective runtime decompression;
-  evaluate startup, lookup latency, memory, and schema migration before changing
-  the format. Current packs stay fully unpacked.
 - Windows support: no target and no WinAPI terminal paths, until POSIX shells are fully settled.
 - Open source definitions and example coverage do not equal Oxford editorial quality.
 - Word frequency cannot infer the relative frequency of senses within a word.
-- Hyphenated compounds can outrank common single words in prefix completion
-  because the score uses raw wordfreq Zipf; changing that needs a ranking policy
-  revision and a rebuilt pack.
-- Candidate rows carry no part of speech; adding one needs a schema-3 index
-  record or a per-candidate database read, both deferred.
 - Custom theme files and btop `.theme` imports are deferred; only built-in
   palettes are supported. No automatic light/dark detection or theme downloads.

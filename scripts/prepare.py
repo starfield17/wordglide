@@ -10,11 +10,13 @@ import hashlib
 import importlib.metadata
 import json
 from pathlib import Path
+import shutil
 import sqlite3
 import unicodedata
 from urllib.parse import quote
 
-POLICY = "100*zipf-2*chars-100*extra_words;exact>inflection>prefix>fuzzy;key_tie"
+OLD_POLICY = "100*zipf-2*chars-100*extra_words;exact>inflection>prefix>fuzzy;key_tie"
+POLICY = "100*zipf-2*chars-100*extra_words-150*hyphens;hyphens=U+002D,U+2010;exact>inflection>prefix>fuzzy;key_tie"
 INFLECTION_TAGS = {"plural", "singular", "first-person", "second-person", "third-person",
                    "past", "present", "participle", "comparative", "superlative", "gerund"}
 
@@ -26,6 +28,48 @@ def normalize(text):
 
 def historical(sense):
     return bool({"obsolete", "archaic"}.intersection(sense["tags"]))
+
+
+def hyphen_penalty(key):
+    return 150 * sum(c in "-\u2010" for c in key)
+
+
+def ranking_score(key, zipf):
+    return (round(100 * zipf) - 2 * len(key)
+            - 100 * max(0, len(key.split()) - 1) - hyphen_penalty(key))
+
+
+def rerank_prepared(args):
+    """Reuse source-grounded canonical content and its pinned wordfreq scores."""
+    prepared = args.prepared
+    source = json.loads((prepared / "source.json").read_text())
+    old_policy = source.get("ranking")
+    if old_policy not in {OLD_POLICY, POLICY}:
+        raise ValueError("Unsupported prepared ranking policy")
+    output = Path(args.output)
+    output.mkdir(parents=True, exist_ok=False)
+    count = 0
+    with (prepared / "entries.jsonl").open(encoding="utf-8") as entries, (output / "entries.jsonl").open("w", encoding="utf-8") as out:
+        for line in entries:
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            key = entry["key"]
+            if not key or key != normalize(key) or type(entry["score"]) is not int:
+                raise ValueError("Invalid prepared key or score")
+            if old_policy == OLD_POLICY:
+                entry["score"] -= hyphen_penalty(key)
+            out.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+            count += 1
+    if not count or source.get("quality_report", {}).get("entries", count) != count:
+        raise ValueError("Prepared entry count differs from source receipt")
+    source["ranking"] = POLICY
+    source["reranked_from"] = {"ranking": old_policy, "entries_sha256": sha256(prepared / "entries.jsonl")}
+    (output / "source.json").write_text(json.dumps(source, ensure_ascii=False, indent=2) + "\n")
+    for name in ("quality.json", "rejected.jsonl"):
+        if (prepared / name).is_file():
+            shutil.copyfile(prepared / name, output / name)
+    print(f"Re-ranked {count:,} entries; source content and frequency baseline retained", flush=True)
 
 
 def extract(raw):
@@ -163,7 +207,7 @@ def prepare(args):
         valid = list(dict.fromkeys(valid))
         report["unresolved_form_targets"] += len(set(form_targets).difference(valid, {key}))
         z = zipf_frequency(key, "en", wordlist="large")
-        score = round(100 * z) - 2 * len(key) - 100 * max(0, len(key.split()) - 1)
+        score = ranking_score(key, z)
         entry = {"key": key, "headword": groups[0]["headword"], "score": score,
                  "groups": groups, "lemmas": valid,
                  "preview_lemmas": bool(valid) and bool(active) and bool(active[0]["targets"]),
@@ -223,11 +267,21 @@ def prepare(args):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--input", required=True, type=Path)
+    inputs = p.add_mutually_exclusive_group(required=True)
+    inputs.add_argument("--input", type=Path)
+    inputs.add_argument("--prepared", type=Path, help="Re-rank an existing prepared directory without changing source content")
     p.add_argument("--output", required=True)
-    p.add_argument("--snapshot", required=True, help="Source snapshot date or reproducible identifier")
+    p.add_argument("--snapshot", help="Source snapshot date or reproducible identifier (required with --input)")
     p.add_argument("--source-url", default="https://kaikki.org/dictionary/rawdata.html")
-    prepare(p.parse_args())
+    args = p.parse_args()
+    if args.prepared:
+        if args.snapshot:
+            p.error("--prepared preserves the existing snapshot; do not pass --snapshot")
+        rerank_prepared(args)
+    else:
+        if not args.snapshot:
+            p.error("--input requires --snapshot")
+        prepare(args)
 
 
 if __name__ == "__main__":

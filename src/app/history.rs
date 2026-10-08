@@ -49,7 +49,7 @@ impl App {
             } else {
                 Request::Search(self.generation, self.input.clone())
             };
-            if self.request.send(request).is_err() {
+            if self.send_request(request).is_err() {
                 self.worker_error();
             }
         }

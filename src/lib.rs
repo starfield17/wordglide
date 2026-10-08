@@ -14,6 +14,7 @@ mod app;
 mod build;
 mod config;
 mod download;
+mod entry_codec;
 mod index;
 mod model;
 mod normalize;
@@ -28,4 +29,7 @@ pub use model::{Candidate, Entry, Example, Group, MatchKind, Preview, Sense};
 pub use normalize::normalize;
 pub use store::{Dictionary, PackInfo, pack_info, verify_pack};
 pub use theme::{Appearance, AppearanceOverrides, ThemePreset};
-pub use ui::{RunOptions, download_data, download_data_with_cancel, draw, run, run_with_options};
+pub use ui::{
+    RunOptions, download_data, download_data_with_cancel, draw, run, run_with_options,
+    run_without_dictionary,
+};

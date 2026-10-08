@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.0
+
+- Startup without a usable dictionary opens Settings and download guidance. The
+  first F2 download enables lookup immediately; active-dictionary updates retain
+  the current reading session until restart.
+- Releases provide program archives and a shared dictionary archive. Combined
+  with-data program bundles are no longer generated.
+
+- Schema 3 stores independently compressed zlib definitions in SQLite and
+  decompresses only requested entries, with bounded input/output and full-stream
+  checks. Full verification also checks every entry against candidate metadata.
+- Fixed ranking deducts 150 points per ASCII/Unicode hyphen (U+002D/U+2010),
+  reducing inflated compound estimates while preserving exact-match priority.
+- Candidate rows show compact source parts of speech directly from the prebuilt
+  index, preserving single-row selection and mouse behavior in narrow layouts.
+- Public `Candidate.parts_of_speech: Vec<String>` contains sorted distinct source
+  labels. Rust callers constructing candidates must supply this new field;
+  deserialization of missing fields defaults to an empty list.
+- Schema 2 packs and old prepared ranking receipts are rejected. Install a new
+  dictionary and check explicit data-path overrides. `scripts/prepare.py --prepared`
+  can re-rank previous canonical data without altering source definitions/examples.
+
+No new dependencies. Existing run, appearance, and reading interfaces remain
+compatible. Old program/data pairs remain usable separately.
+
 ## 0.3.1
 
 - First crates.io release; install with `cargo install wordglide --locked`.

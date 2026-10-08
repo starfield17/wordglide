@@ -235,6 +235,11 @@ pub(super) fn styled_rows(app: &App, range: Range<usize>) -> Vec<ReadingLine> {
 }
 
 fn empty_state(app: &App) -> String {
+    if let Some(notice) = &app.dictionary_notice {
+        return format!(
+            "No usable dictionary.\nPress F2 → Download / update dictionary… to install the latest dictionary, or run wordglide --download-data.\n\n{notice}"
+        );
+    }
     if app.loading {
         return "Looking up…".into();
     }

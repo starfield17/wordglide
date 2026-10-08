@@ -191,7 +191,12 @@ fn headword_and_ipa_have_distinct_reading_styles() {
             .iter()
             .any(|cell| cell.fg == Color::Cyan && cell.modifier.contains(Modifier::BOLD))
     );
-    let slash = (0..120)
+    // Candidate POS summaries also contain slashes. Inspect the reading pane,
+    // whose heading begins to the right of the candidate pane title.
+    let definition_start = (0..119)
+        .find(|&x| buffer[(x, 3)].symbol() == "D" && buffer[(x + 1, 3)].symbol() == "e")
+        .unwrap();
+    let slash = (definition_start..120)
         .find(|&x| buffer[(x, row)].symbol() == "/")
         .unwrap();
     assert_eq!(buffer[(slash, row)].fg, Color::DarkGray);

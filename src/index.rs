@@ -2,11 +2,14 @@ use crate::{Candidate, MatchKind};
 use anyhow::{Context, Result, ensure};
 use fst::{IntoStreamer, Streamer};
 use levenshtein_automata::LevenshteinAutomatonBuilder;
-use std::{cmp::Reverse, collections::BinaryHeap};
+use std::{
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap},
+};
 
-const MAGIC: &[u8; 8] = b"WGLIDX02";
+const MAGIC: &[u8; 8] = b"WGLIDX03";
 const HEADER: usize = 32;
-const RECORD: usize = 20;
+const RECORD: usize = 28;
 const EMPTY: usize = u32::MAX as usize;
 
 // All offsets and integers are decoded safely from a portable little-endian file.
@@ -37,6 +40,7 @@ impl Index {
             .context("Index too large")?;
         let mut strings = Vec::new();
         let mut records = Vec::new();
+        let mut parts_pool = HashMap::new();
         for word in words {
             let key_offset = u32::try_from(strings.len())?;
             let key_len = u32::try_from(word.key.len())?;
@@ -52,6 +56,28 @@ impl Index {
                 records.extend_from_slice(&n.to_le_bytes());
             }
             records.extend_from_slice(&word.score.to_le_bytes());
+            ensure!(
+                !word.parts_of_speech.is_empty()
+                    && word
+                        .parts_of_speech
+                        .iter()
+                        .all(|p| !p.is_empty() && !p.contains('\0'))
+                    && word.parts_of_speech.windows(2).all(|p| p[0] < p[1]),
+                "Invalid candidate parts of speech"
+            );
+            // NUL-delimited source labels are interned as a binary string slice;
+            // repeated combinations cost just an offset and length per record.
+            let parts = word.parts_of_speech.join("\0");
+            let (offset, len) = if let Some(&range) = parts_pool.get(&parts) {
+                range
+            } else {
+                let range = (u32::try_from(strings.len())?, u32::try_from(parts.len())?);
+                strings.extend_from_slice(parts.as_bytes());
+                parts_pool.insert(parts, range);
+                range
+            };
+            records.extend_from_slice(&offset.to_le_bytes());
+            records.extend_from_slice(&len.to_le_bytes());
         }
         ensure!(strings.len() <= u32::MAX as usize, "String index too large");
         let best = |a: usize, b: usize| {
@@ -171,6 +197,19 @@ impl Index {
         ))
     }
 
+    pub(crate) fn parts_of_speech(&self, i: usize) -> Result<Vec<String>> {
+        let text = self.text(i, 20)?;
+        let parts: Vec<_> = text.split('\0').map(str::to_owned).collect();
+        ensure!(
+            parts
+                .iter()
+                .all(|p| !p.is_empty() && !p.chars().any(char::is_control))
+                && parts.windows(2).all(|p| p[0] < p[1]),
+            "Corrupt candidate parts of speech"
+        );
+        Ok(parts)
+    }
+
     fn tree(&self, i: usize) -> Result<usize> {
         ensure!(i < 2 * self.leaves, "Corrupt tree offset");
         let start = self.tree_start + 4 * i;
@@ -203,6 +242,7 @@ impl Index {
                 "Corrupt vocabulary order"
             );
             ensure!(!self.text(i, 8)?.is_empty(), "Corrupt display word");
+            self.parts_of_speech(i)?;
             let (fst_key, value) = stream.next().context("Incomplete fuzzy index")?;
             ensure!(
                 fst_key == key.as_bytes() && value == i as u64,
@@ -362,6 +402,7 @@ impl Index {
             headword: self.text(i, 8)?.into(),
             score: self.score(i)?,
             kind,
+            parts_of_speech: self.parts_of_speech(i)?,
         })
     }
 }
@@ -377,6 +418,7 @@ mod tests {
                 headword: format!("h{i:04}"),
                 score: (i * 37) % 101,
                 kind: MatchKind::Prefix,
+                parts_of_speech: vec!["noun".into()],
             })
             .collect();
         let mut builder = fst::MapBuilder::memory();
@@ -397,5 +439,42 @@ mod tests {
             reference.truncate(20);
             assert_eq!(index.prefix(query, 20).unwrap(), reference);
         }
+    }
+
+    #[test]
+    fn parts_lists_are_interned_and_corrupt_metadata_is_rejected() {
+        let words: Vec<_> = ["alpha", "beta"]
+            .into_iter()
+            .map(|key| Candidate {
+                key: key.into(),
+                headword: key.into(),
+                score: 0,
+                kind: MatchKind::Prefix,
+                parts_of_speech: vec!["noun".into(), "unusual-label".into(), "verb".into()],
+            })
+            .collect();
+        let mut builder = fst::MapBuilder::memory();
+        for (i, word) in words.iter().enumerate() {
+            builder.insert(&word.key, i as u64).unwrap();
+        }
+        let fst = builder.into_inner().unwrap();
+        let mut bytes = Index::encode(&words).unwrap();
+        assert_eq!(
+            &bytes[HEADER + 20..HEADER + 28],
+            &bytes[HEADER + RECORD + 20..HEADER + RECORD + 28]
+        );
+        let index = Index::open(bytes.clone(), fst.clone()).unwrap();
+        index.verify().unwrap();
+        assert_eq!(
+            index
+                .candidate(0, MatchKind::Exact)
+                .unwrap()
+                .parts_of_speech,
+            words[0].parts_of_speech
+        );
+        bytes[HEADER + 20..HEADER + 24].copy_from_slice(&u32::MAX.to_le_bytes());
+        let index = Index::open(bytes, fst).unwrap();
+        assert!(index.candidate(0, MatchKind::Exact).is_err());
+        assert!(index.verify().is_err());
     }
 }

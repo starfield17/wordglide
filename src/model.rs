@@ -51,6 +51,15 @@ pub struct Entry {
     pub source_url: String,
 }
 
+impl Entry {
+    pub(crate) fn parts_of_speech(&self) -> Vec<String> {
+        let mut parts: Vec<_> = self.groups.iter().map(|g| g.pos.clone()).collect();
+        parts.sort();
+        parts.dedup();
+        parts
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MatchKind {
     Exact,
@@ -65,6 +74,9 @@ pub struct Candidate {
     pub headword: String,
     pub score: i32,
     pub kind: MatchKind,
+    /// Sorted, distinct source labels from all of the entry's groups.
+    #[serde(default)]
+    pub parts_of_speech: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +95,5 @@ pub(crate) struct Manifest {
     pub sizes: std::collections::BTreeMap<String, u64>,
 }
 
-pub(crate) const SCHEMA_VERSION: u32 = 2;
-pub(crate) const RANKING: &str =
-    "100*zipf-2*chars-100*extra_words;exact>inflection>prefix>fuzzy;key_tie";
+pub(crate) const SCHEMA_VERSION: u32 = 3;
+pub(crate) const RANKING: &str = "100*zipf-2*chars-100*extra_words-150*hyphens;hyphens=U+002D,U+2010;exact>inflection>prefix>fuzzy;key_tie";

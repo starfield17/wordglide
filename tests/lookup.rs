@@ -117,7 +117,7 @@ fn lightweight_open_and_explicit_verification_are_separate() {
     let file = path.join("manifest.json");
     let mut manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
-    assert_eq!(manifest["schema_version"], 2);
+    assert_eq!(manifest["schema_version"], 3);
     manifest["files"]["entries.sqlite"] = "0".repeat(64).into();
     fs::write(file, manifest.to_string()).unwrap();
     assert!(
@@ -161,7 +161,7 @@ fn invalid_record_offsets_return_errors_instead_of_panicking() {
     let path = dir.path().join("pack");
     let file = path.join("lexicon.bin");
     let mut bytes = fs::read(&file).unwrap();
-    // Fixed 32-byte header, then 20-byte candidate records: first key offset.
+    // Fixed 32-byte header, then 28-byte candidate records: first key offset.
     bytes[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
     fs::write(file, bytes).unwrap();
     let mut dict = Dictionary::open(&path).unwrap();
@@ -181,7 +181,7 @@ fn full_verification_checks_tree_and_strings_even_with_updated_hashes() {
             bytes[32..36].copy_from_slice(&u32::MAX.to_le_bytes());
         } else {
             let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
-            let root = 32 + 20 * count + 4;
+            let root = 32 + 28 * count + 4;
             bytes[root..root + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         }
         fs::write(file, &bytes).unwrap();
@@ -207,16 +207,14 @@ fn same_length_database_content_damage_is_detected_by_explicit_verification() {
     let file = path.join("entries.sqlite");
     let size = fs::metadata(&file).unwrap().len();
     let conn = rusqlite::Connection::open(&file).unwrap();
-    let payload: String = conn
+    let mut payload: Vec<u8> = conn
         .query_row("SELECT payload FROM entries WHERE key='house'", [], |r| {
             r.get(0)
         })
         .unwrap();
-    conn.execute(
-        "UPDATE entries SET payload=?1 WHERE key='house'",
-        [payload.replace("fixture", "altered")],
-    )
-    .unwrap();
+    payload[2] ^= 1;
+    conn.execute("UPDATE entries SET payload=?1 WHERE key='house'", [payload])
+        .unwrap();
     drop(conn);
     assert_eq!(fs::metadata(file).unwrap().len(), size);
     assert!(Dictionary::open(&path).is_ok());
@@ -256,7 +254,7 @@ fn pack_info_reports_metadata_and_verify_counts_entries() {
     .unwrap();
 
     let info = wordglide::pack_info(&out).unwrap();
-    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.schema_version, 3);
     assert_eq!(info.candidate_count, 89);
     assert_eq!(info.snapshot, "2026-09-02-sampled-2026-10-06");
     assert!(info.source.contains("Wiktionary"));

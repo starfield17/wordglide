@@ -8,17 +8,40 @@ import tarfile
 import tempfile
 import unittest
 from package import checksum, portable_metadata
+from prepare import POLICY, OLD_POLICY
 
 
 class PackagingTests(unittest.TestCase):
-    def test_three_archive_types_preserve_content_and_remove_identity(self):
+    def test_schema_three_archives_reject_old_or_missing_ranking(self):
+        from package import validate_data_archive
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "data.tar.gz"
+            for ranking in (OLD_POLICY, None):
+                files = {name: b"format fixture" for name in ("entries.sqlite", "words.fst", "lexicon.bin")}
+                manifest = {"schema_version":3, "candidate_count":1,
+                            "files":{name:hashlib.sha256(data).hexdigest() for name,data in files.items()},
+                            "sizes":{name:len(data) for name,data in files.items()}}
+                if ranking is not None:
+                    manifest["ranking"] = ranking
+                files["manifest.json"] = json.dumps(manifest).encode()
+                files["THIRD_PARTY.md"] = b"attribution fixture"
+                with tarfile.open(archive, "w:gz") as tar:
+                    for name,data in files.items():
+                        member = tarfile.TarInfo("english-pack/" + name)
+                        member.size = len(data)
+                        member.mode = 0o644
+                        tar.addfile(member, io.BytesIO(data))
+                with self.assertRaises(ValueError):
+                    validate_data_archive(archive)
+
+    def test_two_archive_types_preserve_content_and_remove_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pack = root / "pack"
             pack.mkdir()
             for name in ("entries.sqlite", "words.fst", "lexicon.bin"):
                 (pack / name).write_bytes(b"format fixture")
-            manifest = {"schema_version": 2, "candidate_count": 1,
+            manifest = {"schema_version": 3, "ranking": POLICY, "candidate_count": 1,
                         "sizes": {name: (pack / name).stat().st_size for name in
                                   ("entries.sqlite", "words.fst", "lexicon.bin")},
                         "files": {name: checksum(pack / name) for name in
@@ -34,7 +57,7 @@ class PackagingTests(unittest.TestCase):
                             "--target", "x86_64-unknown-linux-musl", "--version", "0.1.0",
                             "--output", str(output)], check=True, capture_output=True)
             archives = list(output.glob("*.tar.gz"))
-            self.assertEqual(len(archives), 3)
+            self.assertEqual(len(archives), 2)
             for archive in archives:
                 with tarfile.open(archive) as tar:
                     members = tar.getmembers()
@@ -47,8 +70,8 @@ class PackagingTests(unittest.TestCase):
                         self.assertNotIn("wordglide/wordglide", names)
                     else:
                         self.assertEqual(tar.extractfile("wordglide/wordglide").read(), b"executable fixture")
-                        self.assertEqual(bool("wordglide/english-pack/manifest.json" in names),
-                                         "with-data" in archive.name)
+                        self.assertNotIn("wordglide/english-pack/manifest.json", names)
+                        self.assertNotIn("with-data", archive.name)
             for line in (output / "SHA256SUMS.txt").read_text().splitlines():
                 expected, name = line.split("  ")
                 self.assertEqual(checksum(output / name), expected)
@@ -77,7 +100,7 @@ class PackagingTests(unittest.TestCase):
         from package import validate_data_archive
         payload = b"format fixture"
         files = {name: payload for name in ("entries.sqlite", "words.fst", "lexicon.bin")}
-        files["manifest.json"] = json.dumps({"schema_version": 2, "candidate_count": 1,
+        files["manifest.json"] = json.dumps({"schema_version": 3, "ranking": POLICY, "candidate_count": 1,
             "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
             "sizes": {name: len(data) for name, data in files.items()}}).encode()
         files["THIRD_PARTY.md"] = b"attribution fixture"

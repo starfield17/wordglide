@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build program-only, data-only, and ready-to-run Wordglide release archives."""
+"""Build program-only and shared dictionary Wordglide release archives."""
 import argparse
 from contextlib import contextmanager
 import gzip
@@ -10,6 +10,7 @@ import re
 import shutil
 import tarfile
 import tomllib
+from prepare import POLICY
 
 DATA_FILES = ("entries.sqlite", "words.fst", "lexicon.bin")
 DATA_MEMBERS = {"english-pack/" + name for name in
@@ -67,7 +68,8 @@ def validate_data_archive(path):
                 for block in iter(lambda: source.read(1024 * 1024), b""):
                     h.update(block)
                 hashes[name] = h.hexdigest()
-    if seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 2:
+    if (seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 3
+            or manifest.get("ranking") != POLICY):
         raise ValueError("Incomplete data archive or unsupported schema")
     if manifest.get("candidate_count", 0) <= 0:
         raise ValueError("Empty data archive")
@@ -97,8 +99,8 @@ def main():
         raise ValueError("Build the Wordglide release executable first")
     if args.pack:
         manifest = json.loads((args.pack / "manifest.json").read_text())
-        if manifest.get("schema_version") != 2:
-            raise ValueError("Unsupported pack schema")
+        if manifest.get("schema_version") != 3 or manifest.get("ranking") != POLICY:
+            raise ValueError("Unsupported pack schema or ranking")
         for name in DATA_FILES:
             if checksum(args.pack / name) != manifest["files"][name]:
                 raise ValueError(f"Corrupt file: {name}")
@@ -117,18 +119,10 @@ def main():
     else:
         shutil.copyfile(args.data_archive, archive)
     stem = f"wordglide-v{args.version}-{args.target}"
-    for with_data in (False, True):
-        name = stem + ("-with-data" if with_data else "") + ".tar.gz"
-        with archive_writer(args.output / name) as tar:
-            tar.add(args.binaries / "wordglide", arcname="wordglide/wordglide", filter=portable_metadata)
-            for doc in DOCS:
-                tar.add(root / doc, arcname="wordglide/" + doc, filter=portable_metadata)
-            if with_data:
-                with tarfile.open(archive, "r|gz") as source:
-                    for member in source:
-                        payload = source.extractfile(member)
-                        member.name = "wordglide/" + member.name
-                        tar.addfile(portable_metadata(member), payload)
+    with archive_writer(args.output / (stem + ".tar.gz")) as tar:
+        tar.add(args.binaries / "wordglide", arcname="wordglide/wordglide", filter=portable_metadata)
+        for doc in DOCS:
+            tar.add(root / doc, arcname="wordglide/" + doc, filter=portable_metadata)
     receipts = {path.name: checksum(path) for path in sorted(args.output.glob("*.tar.gz"))}
     (args.output / "SHA256SUMS.txt").write_text("".join(f"{value}  {name}\n" for name, value in receipts.items()))
     print(json.dumps(receipts, indent=2))

@@ -1,5 +1,5 @@
 use crate::{
-    Candidate, Entry, MatchKind, Preview,
+    Candidate, Entry, MatchKind, Preview, entry_codec,
     index::Index,
     model::{Manifest, RANKING, SCHEMA_VERSION},
     normalize,
@@ -44,10 +44,10 @@ impl Lexicon {
 impl Dictionary {
     /// Open with lightweight structural checks. Use `verify_pack` for full integrity verification.
     pub fn open(path: &Path) -> Result<Self> {
-        let manifest:Manifest=serde_json::from_slice(&fs::read(path.join("manifest.json")).with_context(||format!("No data pack at {}. Download the Wordglide with-data release, set WORDGLIDE_DATA, pass --data DIRECTORY, or place english-pack beside the executable. See README.md.",path.display()))?)?;
+        let manifest:Manifest=serde_json::from_slice(&fs::read(path.join("manifest.json")).with_context(||format!("No data pack at {}. Start Wordglide and use F2 Settings to download, run wordglide --download-data, or select a prepared pack with --data / WORDGLIDE_DATA. See README.md.",path.display()))?)?;
         ensure!(
             manifest.schema_version == SCHEMA_VERSION,
-            "Incompatible data pack version {}; expected {}. Download a new data pack; old formats are not supported.",
+            "Incompatible data pack version {}; expected {}. Run wordglide --download-data with an updated program. Check --data / WORDGLIDE_DATA overrides for an old pack; old formats are not supported.",
             manifest.schema_version,
             SCHEMA_VERSION
         );
@@ -98,10 +98,13 @@ impl Dictionary {
                 .any(|(n, t, p)| n == "key" && t.eq_ignore_ascii_case("TEXT") && *p)
                 && columns
                     .iter()
-                    .any(|(n, t, _)| n == "payload" && t.eq_ignore_ascii_case("TEXT")),
+                    .any(|(n, t, _)| n == "payload" && t.eq_ignore_ascii_case("BLOB"))
+                && columns
+                    .iter()
+                    .any(|(n, t, _)| n == "raw_len" && t.eq_ignore_ascii_case("INTEGER")),
             "Incompatible entries table"
         );
-        conn.prepare("SELECT payload FROM entries WHERE key=?1")?;
+        conn.prepare("SELECT raw_len,payload FROM entries WHERE key=?1")?;
         Ok(Self {
             index,
             conn,
@@ -180,15 +183,10 @@ impl Dictionary {
             self.order.push_back(key.to_string());
             return Ok(entry);
         }
-        let payload: String = self
-            .conn
-            .query_row("SELECT payload FROM entries WHERE key=?1", [key], |row| {
-                row.get(0)
-            })
-            .with_context(|| format!("Missing dictionary entry: {key}"))?;
-        let entry: Arc<Entry> = Arc::new(serde_json::from_str(&payload)?);
+        let (raw_len, payload) = read_payload(&self.conn, key)?;
+        let entry: Arc<Entry> = Arc::new(entry_codec::decode(key, raw_len, &payload)?);
         // Approximate heap footprint conservatively; cache is bounded by payload+overhead.
-        let bytes = payload.len() * 4 + 512;
+        let bytes = raw_len as usize * 4 + 512;
         if bytes <= CACHE_BYTES {
             while self.cache_bytes + bytes > CACHE_BYTES {
                 if let Some(old) = self.order.pop_front()
@@ -219,6 +217,15 @@ impl Dictionary {
     }
 }
 
+// Inspect lengths before materializing a BLOB, including externally supplied packs.
+fn read_payload(conn: &Connection, key: &str) -> Result<(i64, Vec<u8>)> {
+    conn.query_row(
+        "SELECT raw_len, CASE WHEN typeof(raw_len)='integer' AND raw_len BETWEEN 1 AND ?2 AND typeof(payload)='blob' AND length(payload) BETWEEN 1 AND ?3 THEN payload ELSE NULL END FROM entries WHERE key=?1",
+        rusqlite::params![key, entry_codec::MAX_RAW as i64, entry_codec::MAX_COMPRESSED as i64],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    ).with_context(|| format!("Missing or corrupt dictionary entry: {key}"))
+}
+
 /// Human-readable metadata about a prepared data pack.
 #[derive(Debug, Clone)]
 pub struct PackInfo {
@@ -236,7 +243,7 @@ pub fn pack_info(path: &Path) -> Result<PackInfo> {
     let manifest: Manifest = serde_json::from_slice(
         &fs::read(path.join("manifest.json")).with_context(|| {
             format!(
-                "No data pack at {}. Download the Wordglide with-data release, set WORDGLIDE_DATA, pass --data DIRECTORY, or place english-pack beside the executable. See README.md.",
+                "No data pack at {}. Start Wordglide and use F2 Settings to download, run wordglide --download-data, or select a prepared pack with --data / WORDGLIDE_DATA. See README.md.",
                 path.display()
             )
         })?,
@@ -309,6 +316,16 @@ pub fn verify_pack(path: &Path) -> Result<usize> {
         ensure!(
             row.get::<_, String>(0)? == dict.index.key(i)?,
             "Database and index vocabulary differ"
+        );
+        let key = dict.index.key(i)?;
+        let (raw_len, payload) = read_payload(&dict.conn, key)?;
+        let entry = entry_codec::decode(key, raw_len, &payload)?;
+        let candidate = dict.index.candidate(i, MatchKind::Exact)?;
+        ensure!(
+            entry.score == candidate.score
+                && entry.headword == candidate.headword
+                && entry.parts_of_speech() == candidate.parts_of_speech,
+            "Corrupt entry/index metadata: {key}"
         );
     }
     ensure!(rows.next()?.is_none(), "Unexpected database entries");

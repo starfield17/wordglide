@@ -16,7 +16,8 @@ example coverage and is not equivalent to Oxford's learner-oriented editing.
   available. Ordinary startup and lookup work without a network connection.
 - **Search as you type.** Candidates and the selected definition update while
   you type, without Enter. A fixed frequency-based ranking helps surface common
-  words. See [ranking and storage](#ranking-and-storage).
+  words, with a fixed hyphen penalty for inflated compound estimates. Candidate
+  rows include compact source parts of speech. See [ranking and storage](#ranking-and-storage).
 - **Completion, word forms, and spelling help.** Accept an inline suggestion or
   use Tab to complete and cycle candidates. Look up forms such as `went`, phrases
   such as `take off`, and one-edit misspellings such as `hosue`. See [keys](#keys).
@@ -30,8 +31,8 @@ example coverage and is not equivalent to Oxford's learner-oriented editing.
   truecolor and 256-color support, a no-color mode, searchable actions, keyboard
   help, mouse controls, and grapheme-aware editing. See [Settings and
   appearance](#settings-and-appearance) and [finding actions](#finding-actions).
-- **Install easily and update when you choose.** Use a [ready-to-run
-  bundle](#download-and-run) or [install with cargo](#install-from-cratesio).
+- **Install easily and update when you choose.** Use a [program
+  archive](#download-and-run) or [install with cargo](#install-from-cratesio).
   Download data explicitly with `wordglide --download-data` or F2 Settings;
   downloads require a network connection and are verified before atomic
   installation. The running session keeps its existing dictionary and reading
@@ -39,17 +40,20 @@ example coverage and is not equivalent to Oxford's learner-oriented editing.
 
 ## Download and run
 
-Download the **with-data** archive matching your platform from
+Download the **program** archive matching your platform from
 [GitHub Releases](https://github.com/starfield17/wordglide/releases/latest).
-It includes the program and the full 1,355,084-entry English dictionary.
+The dictionary is installed separately through the built-in downloader.
 Extract it and run:
 
 ```sh
 ./wordglide/wordglide
 ```
 
-No Rust, Python, database installation, network connection, or dictionary-path
-configuration is required to use a release bundle. Supported release targets:
+The program starts even without a usable dictionary. Press **F2 → Download /
+update dictionary…** to install the latest dictionary, or run
+`./wordglide/wordglide --download-data`. The first successful download enables
+lookup immediately; no restart is needed. Downloads need a network connection,
+while installed lookups stay offline. No Rust or Python is needed. Supported release targets:
 
 | Platform | Target in archive name |
 | --- | --- |
@@ -61,11 +65,10 @@ configuration is required to use a release bundle. Supported release targets:
 Windows is not supported at this stage. No Windows target is built and only
 POSIX terminals are exercised.
 
-Each release provides three download types:
+Each release provides two download types:
 
 - **Program only:** `wordglide-vVERSION-TARGET.tar.gz`.
 - **Dictionary only:** `english-pack.tar.gz`, shared by all platforms.
-- **Ready-to-run bundle:** `wordglide-vVERSION-TARGET-with-data.tar.gz`.
 
 For separate downloads, extract the program, then extract the dictionary into
 the resulting `wordglide/` directory. `english-pack/` must sit beside the
@@ -86,10 +89,13 @@ The crate contains the program and a small build example. The full dictionary is
 installed separately. `--download-data` explicitly contacts GitHub Releases,
 streams the archive, checks SHA-256 and the pack files, and atomically activates
 the verified pack. Esc cancels an interactive download. Normal startup and
-lookups stay offline; missing data prints the download command.
+lookups stay offline; missing, invalid, or incompatible data opens a welcome
+screen with F2 and CLI download instructions. Explicit data path overrides are
+still selected and diagnosed; startup never silently substitutes another pack.
 
 **F2 Settings → Download / update dictionary…** performs the same operation with
-progress and cancellation. The current session keeps its open dictionary,
+progress and cancellation. The first installation activates lookup using the
+current query immediately. When updating an already open dictionary, the current session keeps its open dictionary,
 query, history, and reading position. Restart to use the newly installed pack.
 Updates happen only when requested. A valid installation of the same archive is
 reused. Failed or cancelled installations keep the previous dictionary.
@@ -98,8 +104,11 @@ Downloads live in the platform user-data directory under `downloads/packs`,
 with `downloads/current.json` selecting an immutable pack. Linux uses
 `$XDG_DATA_HOME/dict` (or `~/.local/share/dict`); macOS uses
 `~/Library/Application Support/org.wordglide.dict`. Older installed versions are
-retained; allow roughly 190 MiB for the download and 1.14 GiB for each unpacked
-full dictionary. The data's attribution and licenses ship in its `THIRD_PARTY.md`.
+retained; the schema-3 reference archive is about 429 MiB and each installed
+full dictionary about 608 MiB. Independent entry compression roughly halves
+installed storage but makes the download larger than schema 2's roughly 190 MiB
+archive because the outer archive shares less redundancy across definitions.
+The data's attribution and licenses ship in its `THIRD_PARTY.md`.
 The program is MIT licensed; the dictionary keeps its separate source licenses.
 
 ## Build and try the real-data sample
@@ -270,11 +279,13 @@ wordglide --verify-data --data PACK_DIRECTORY
 ```
 
 This checks all SHA-256 receipts, vocabulary/index agreement, prebuilt ranking,
-and SQLite integrity, prints the entry count and elapsed time, then exits without
+SQLite integrity, every compressed entry, and entry/index headword, score, and
+part-of-speech agreement, prints the entry count and elapsed time, then exits without
 opening the TUI. Omit `--data` to verify the automatically selected pack.
 Successful verification exits with status 0; errors exit with a nonzero status.
-Schema 2 packs are required; old packs must be replaced with a newly built or
-downloaded pack.
+Schema 3 packs are required; schema 2 packs must be replaced with a newly built or
+downloaded pack. If an old pack remains selected, check `--data` and
+`WORDGLIDE_DATA`, which take precedence over managed downloads.
 
 To inspect a pack without verifying it:
 
@@ -370,20 +381,46 @@ then one-edit fuzzy fallback. Fuzzy handles an inserted, missing, wrong, or
 swapped adjacent character for queries of 3–64 characters. It compares complete
 words/phrases; it does not provide fuzzy prefix completion.
 
-The fixed base score is `100*Zipf - 2*characters - 100*extra_words`, ties broken
+The fixed base score is `round(100*Zipf) - 2*characters - 100*extra_words - 150*hyphens`, ties broken
 by normalized key. Wordfreq is queried only while building data. Runtime scores
 never depend on your lookups. Short phrases receive a fixed penalty because
-their wordfreq estimate is not a measured phrase count.
+their wordfreq estimate is not a measured phrase count. ASCII `-` and Unicode
+`‐` (U+2010) each deduct 150 points; exact matches still come first, including
+hyphenated words. Normalization and dictionary coverage do not change.
 
 The compact binary vocabulary and prebuilt range-max tree return prefix top-k
 without sorting all prefix matches. The builder writes `lexicon.bin`: a versioned
-32-byte header, 20-byte candidate records, a little-endian u32 ranking tree, and
-shared UTF-8 strings. Runtime loads this buffer and the FST once, without parsing
+32-byte header, 28-byte candidate records, a little-endian u32 ranking tree, and
+shared UTF-8 strings including interned, NUL-separated part-of-speech lists.
+Candidate labels are sorted and deduplicated across all source groups. The UI
+shows up to two abbreviations and marks omitted labels; narrow rows preserve
+word space and match markers before the POS summary.
+Runtime loads this buffer and the FST once, without parsing
 candidate JSON, creating millions of string objects, or rebuilding the tree.
 Only returned candidates allocate strings. An FST handles exact and fuzzy matching. A read-only SQLite database stores
 structured words, parts of speech, pronunciation, senses, source examples, and
-word forms. A bounded cache holds visited entries. A worker coalesces pending
+word forms as independent zlib-level-6 JSON BLOBs with their original byte length.
+Only requested entries and necessary word-form targets are decompressed; startup
+does not unpack the dictionary. Raw entries are limited to 1 MiB and compressed
+input to 2 MiB, with complete-stream, checksum, length, JSON, and key validation.
+A 32 MiB cache holds parsed visited entries, charged against uncompressed size.
+A worker coalesces pending
 queries; response IDs stop obsolete previews from overwriting newer input.
+
+Library users upgrading to 0.4.0 must include the new
+`Candidate.parts_of_speech: Vec<String>` field in Rust struct literals. Serialized
+candidates missing the field deserialize with an empty list. Existing run and
+settings interfaces remain compatible.
+
+Previously prepared canonical data can be re-ranked without changing source
+content or its frequency baseline:
+
+```sh
+python3 scripts/prepare.py --prepared data/old-prepared --output data/prepared-v3
+```
+
+The builder rejects prepared provenance carrying an old ranking policy. Rebuild
+both the pack and its release archive; schema 2 is not converted at runtime.
 
 ## Build the full data pack
 
@@ -451,14 +488,14 @@ do not establish full-pack performance. See [PERFORMANCE.md](PERFORMANCE.md)
 for the full-data verification.
 
 CI checks source on macOS and Linux. Pushing a `v*` tag whose version matches
-Cargo.toml triggers four native release builds, full-data bundle smoke checks,
+Cargo.toml triggers four native release builds, program plus separate full-dictionary smoke checks,
 and automatic GitHub Release publication after every target passes. Manual
 workflow dispatch builds and verifies the packages without publishing.
 
 `data-release.json` pins the dictionary Release tag, asset, and SHA-256.
 Release builds reuse that archive; they do not download and rebuild a moving
 Wiktionary dump. Updating dictionary data requires a new data Release and an
-explicit checksum update. All three package types retain license notices and
+explicit checksum update. Both package types retain license notices and
 portable archive metadata. Python 3.11+ is required only for maintainer scripts.
 Update packs by unpacking to a new directory and restarting with `--data`, or by
 replacing the adjacent pack while the application is stopped.

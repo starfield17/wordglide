@@ -66,20 +66,36 @@ pub struct App {
     pub(crate) reading: ReadingState,
     pub(crate) panel_query: String,
     pub(crate) mouse_enabled: bool,
-    lexicon: Lexicon,
+    pub(crate) dictionary_notice: Option<String>,
+    lexicon: Option<Lexicon>,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
     generation: u64,
-    request: mpsc::Sender<Request>,
-    response: mpsc::Receiver<Response>,
+    request: Option<mpsc::Sender<Request>>,
+    response: Option<mpsc::Receiver<Response>>,
     completion: Option<Completion>,
     pending_completion: Vec<KeyEvent>,
 }
 
 impl App {
     pub fn new(dictionary: Dictionary, query: &str) -> Self {
-        let lexicon = dictionary.lexicon();
-        let (request, response) = worker::spawn(dictionary);
+        Self::initialize(Some(dictionary), query, None)
+    }
+
+    /// Start an offline session without a usable dictionary. Settings remain available.
+    pub fn without_dictionary(query: &str, notice: String) -> Self {
+        Self::initialize(None, query, Some(notice))
+    }
+
+    fn initialize(dictionary: Option<Dictionary>, query: &str, notice: Option<String>) -> Self {
+        let lexicon = dictionary.as_ref().map(Dictionary::lexicon);
+        let (request, response) = match dictionary {
+            Some(dictionary) => {
+                let (request, response) = worker::spawn(dictionary);
+                (Some(request), Some(response))
+            }
+            None => (None, None),
+        };
         let mut app = Self {
             download_enabled: false,
             download_requested: false,
@@ -106,6 +122,7 @@ impl App {
             reading: ReadingState::default(),
             panel_query: String::new(),
             mouse_enabled: true,
+            dictionary_notice: notice,
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -197,7 +214,9 @@ impl App {
     }
 
     pub fn contains(&self, word: &str) -> bool {
-        self.lexicon.contains(word)
+        self.lexicon
+            .as_ref()
+            .is_some_and(|lexicon| lexicon.contains(word))
     }
 
     /// Move the reading position by `lines` relative to the current offset,
@@ -228,13 +247,37 @@ impl App {
         self.error = None;
         self.picking = false;
         self.labels.clear();
-        self.loading = !normalize(&self.input).is_empty();
+        self.loading = self.request.is_some() && !normalize(&self.input).is_empty();
         if self
-            .request
-            .send(Request::Search(self.generation, self.input.clone()))
+            .send_request(Request::Search(self.generation, self.input.clone()))
             .is_err()
         {
             self.worker_error();
+        }
+    }
+
+    pub(crate) fn has_dictionary(&self) -> bool {
+        self.lexicon.is_some()
+    }
+
+    /// First installation starts lookup immediately; updates retain the active session.
+    pub(crate) fn activate_dictionary(&mut self, dictionary: Dictionary) -> bool {
+        if self.has_dictionary() {
+            return false;
+        }
+        self.lexicon = Some(dictionary.lexicon());
+        let (request, response) = worker::spawn(dictionary);
+        self.request = Some(request);
+        self.response = Some(response);
+        self.dictionary_notice = None;
+        self.search();
+        true
+    }
+
+    fn send_request(&self, request: Request) -> Result<(), mpsc::SendError<Request>> {
+        match &self.request {
+            Some(sender) => sender.send(request),
+            None => Ok(()),
         }
     }
 
@@ -246,7 +289,7 @@ impl App {
     /// Apply only responses belonging to the current query and selected candidate.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
-        while let Ok(response) = self.response.try_recv() {
+        while let Some(Ok(response)) = self.response.as_ref().map(|response| response.try_recv()) {
             match response {
                 Response::Search(id, result) if id == self.generation => {
                     self.loading = false;
@@ -319,8 +362,7 @@ impl App {
         self.loading = true;
         self.picking = false;
         if self
-            .request
-            .send(Request::Preview(
+            .send_request(Request::Preview(
                 self.generation,
                 self.results[selected].clone(),
             ))

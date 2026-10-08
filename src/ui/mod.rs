@@ -6,7 +6,10 @@ mod pointer;
 mod reading;
 mod terminal;
 
-pub use terminal::{RunOptions, download_data, download_data_with_cancel, run, run_with_options};
+pub use terminal::{
+    RunOptions, download_data, download_data_with_cancel, run, run_with_options,
+    run_without_dictionary,
+};
 
 use crate::{App, Focus, ReadingLayout, app::Overlay};
 #[cfg(test)]
