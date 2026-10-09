@@ -14,6 +14,7 @@ categories = ["command-line-utilities"]
 publish = ["crates-io"]
 include = [
     "/Cargo.toml", "/Cargo.lock", "/src/**/*.rs", "/tests/**/*.rs",
+    "/tests/fixtures/*.json",
     "/examples/sample/*.json", "/examples/sample/*.jsonl",
     "/README.md", "/LICENSE", "/THIRD_PARTY.md", "/CHANGELOG.md", "/PERFORMANCE.md",
 ]

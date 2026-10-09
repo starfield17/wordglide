@@ -16,10 +16,15 @@ pub fn normalize(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Consumed by both this crate and scripts/test_prepare.py, so any divergence
+    // between the builder's and the runtime's normalization fails on both sides.
     #[test]
-    fn same_normalization_as_data_builder() {
-        assert_eq!(normalize("  ＴＡＫＥ\tOff  "), "take off");
-        assert_eq!(normalize("DON’T"), "don't");
-        assert_ne!(normalize("résumé"), normalize("resume"));
+    fn shared_cross_language_cases() {
+        let cases: Vec<(String, String)> =
+            serde_json::from_str(include_str!("../tests/fixtures/normalize.json")).unwrap();
+        for (input, expected) in cases {
+            assert_eq!(normalize(&input), expected, "input {input:?}");
+        }
     }
 }

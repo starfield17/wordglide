@@ -16,6 +16,16 @@ use std::{
 const CACHE_BYTES: usize = 32 * 1024 * 1024;
 const LIMIT: usize = 20;
 
+/// Startup hint shared by every command that needs a readable pack directory.
+fn pack_open_hint(path: &Path) -> String {
+    format!(
+        "No data pack at {}. Start Wordglide and use F2 Settings to download, \
+         run wordglide --download-data, or select a prepared pack with \
+         --data / WORDGLIDE_DATA. See README.md.",
+        path.display()
+    )
+}
+
 pub struct Dictionary {
     index: Arc<Index>,
     conn: Connection,
@@ -44,7 +54,9 @@ impl Lexicon {
 impl Dictionary {
     /// Open with lightweight structural checks. Use `verify_pack` for full integrity verification.
     pub fn open(path: &Path) -> Result<Self> {
-        let manifest:Manifest=serde_json::from_slice(&fs::read(path.join("manifest.json")).with_context(||format!("No data pack at {}. Start Wordglide and use F2 Settings to download, run wordglide --download-data, or select a prepared pack with --data / WORDGLIDE_DATA. See README.md.",path.display()))?)?;
+        let manifest: Manifest = serde_json::from_slice(
+            &fs::read(path.join("manifest.json")).with_context(|| pack_open_hint(path))?,
+        )?;
         ensure!(
             manifest.schema_version == SCHEMA_VERSION,
             "Incompatible data pack version {}; expected {}. Run wordglide --download-data with an updated program. Check --data / WORDGLIDE_DATA overrides for an old pack; old formats are not supported.",
@@ -241,12 +253,7 @@ pub struct PackInfo {
 /// Read pack metadata without opening the SQLite database or the indexes.
 pub fn pack_info(path: &Path) -> Result<PackInfo> {
     let manifest: Manifest = serde_json::from_slice(
-        &fs::read(path.join("manifest.json")).with_context(|| {
-            format!(
-                "No data pack at {}. Start Wordglide and use F2 Settings to download, run wordglide --download-data, or select a prepared pack with --data / WORDGLIDE_DATA. See README.md.",
-                path.display()
-            )
-        })?,
+        &fs::read(path.join("manifest.json")).with_context(|| pack_open_hint(path))?,
     )?;
     let field = |key: &str| {
         manifest

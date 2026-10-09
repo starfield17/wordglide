@@ -1,5 +1,9 @@
 //! Offline lookup engine and data pack builder.
 //!
+//! F1 ← S2 / F4 ← S2: private modules keep pack writing and configuration out of
+//! the public API; the compile-fail doc tests below are part of the boundary
+//! check named in `SPEC.md`.
+//!
 //! Internal indexes are deliberately not a public API:
 //! ```compile_fail
 //! use wordglide::index::Index;

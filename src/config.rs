@@ -340,6 +340,7 @@ mod tests {
         assert_eq!(restored.reading_preferences(), next);
         assert_eq!(palette.color_theme, ThemePreset::Whiteout);
         let values: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        // N2 ← S3: query text and lookup history are never persisted.
         assert_eq!(values["other"], 123);
         assert!(values.get("input").is_none());
         assert!(values.get("history").is_none());

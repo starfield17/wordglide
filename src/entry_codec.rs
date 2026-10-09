@@ -51,6 +51,7 @@ pub(crate) fn decode(key: &str, raw_len: i64, payload: &[u8]) -> Result<Entry> {
 
 #[cfg(test)]
 mod tests {
+    // F3 ← S2: bounded raw/compressed length, stream completion, and key agreement.
     use super::*;
 
     fn fixture() -> Entry {

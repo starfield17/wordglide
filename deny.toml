@@ -1,0 +1,42 @@
+# Dependency policy for `cargo deny check`, run by `make check` and CI.
+# The offline and redistribution promises it protects live in SPEC.md (S2, F4).
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# Permissive licenses only. Dictionary and frequency data licensing is separate
+# and documented in THIRD_PARTY.md; this list covers the Rust dependency graph.
+confidence-threshold = 0.93
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+# Duplicate versions are reported for review but do not fail the build; Cargo.lock
+# pins the exact set. An unversioned wildcard dependency is rejected.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

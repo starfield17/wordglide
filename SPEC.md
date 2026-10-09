@@ -1,6 +1,13 @@
 # Wordglide
 
-Intent: craft — an independently implemented offline incremental reading tool.
+## Soul
+Is: craft — an independently implemented offline incremental reading tool for terminal readers.
+Is not: a learner-dictionary platform; a multi-dictionary or plugin manager; a networked or personalized service.
+S1 Source-faithful over smoothed — rejects: rewriting definitions or inventing examples to fill gaps.
+S2 Prebuilt offline over rebuilt or fetched — rejects: network access or index rebuilding during startup and lookup.
+S3 Fixed deterministic ranking over personalization — rejects: personal word frequency or persistent per-user lookup history.
+Status: building
+
 Done when: type `ho`, see ranked completions and automatic definition preview;
 look up `hosue`, `went`, `better`, and `take off`; follow a word in a definition
 and return to the original query, selection, focus, and scroll position.
@@ -158,13 +165,23 @@ belongs to the terminal session, never the dictionary worker or data pack.
 
 ## Do not build
 - N1 No network during normal startup or lookup, and no LLM dependencies.
-  Only an explicitly requested prebuilt-pack installation uses the network.
-- N2 No personal ranking or persistent lookup history.
-- N3 No audio, images, cloud services, plugins, or multi-dictionary management.
-- N4 No rewriting definitions or inventing examples to fill source gaps.
-- N5 Prefix top-k must not enumerate and sort all prefix matches.
-- N6 When an out-of-scope issue appears, record it below; do not implement it.
-- N7 No runtime candidate JSON parsing or rebuilding the ranking tree.
+  Only an explicitly requested prebuilt-pack installation uses the network ← S2
+  — check: scripts/test_boundaries.py (network calls stay in src/download.rs);
+  review: no LLM dependency appears in Cargo.toml.
+- N2 No personal ranking or persistent lookup history ← S3
+  — check: cargo test config::tests::reading_preferences_save_retry_and_preserve_cli_overrides.
+- N3 No audio, images, cloud services, plugins, or multi-dictionary management ← Is not
+  — review: no such dependency, command, or pane appears in the diff.
+- N4 No rewriting definitions or inventing examples to fill source gaps ← S1
+  — check: cargo test entry_codec::tests::roundtrip_preserves_every_source_field;
+  check: scripts/test_prepare.py.
+- N5 Prefix top-k must not enumerate and sort all prefix matches ← F2
+  — check: cargo test index::tests::prefix_matches_exhaustive_oracle_with_ties;
+  review: src/index.rs prefix walks the prebuilt range-max tree, not every key.
+- N6 When an out-of-scope issue appears, record it below; do not implement it
+  — review: the finding appears under "Found · Not doing" instead of in code.
+- N7 No runtime candidate JSON parsing or rebuilding the ranking tree ← F1
+  — check: scripts/test_boundaries.py (pack encoders are referenced only by src/build.rs).
 
 ## Frame
 Compile source data to a local pack. Runtime indexes contain compact binary candidate metadata and prebuilt ranking;
@@ -177,6 +194,18 @@ and checks raw length, JSON, and key. Parsed entries retain the 32 MiB cache
 budget charged against uncompressed size. Schema-3 installed pack size must
 be <=70% of schema 2 for the same source snapshot, alongside existing latency
 and memory targets.
+F1 Only build and prepare write pack data; startup never decompresses entries or
+rebuilds the ranking tree ← S2 — check: scripts/test_boundaries.py;
+check: cargo test --doc.
+F2 Indexed top-k equals exhaustive fixed-score ranking, and prefix search never
+enumerates and sorts all matches ← S3
+— check: cargo test index::tests::prefix_matches_exhaustive_oracle_with_ties;
+review: src/index.rs prefix walks the prebuilt range-max tree.
+F3 The private entry codec bounds raw input to 1 MiB and compressed input to
+2 MiB and rejects truncated, tailed, or checksum-failing streams ← S2
+— check: cargo test entry_codec::tests.
+F4 The installer copies verified prebuilt bytes and never calls the data
+generator ← S2 — check: scripts/test_boundaries.py.
 Oracle: compare indexed top-k with exhaustive fixed-score ranking in tests.
 Boundary check: compiler privacy/doc test; the installer copies verified prebuilt
 bytes and never calls the data generator.
@@ -187,6 +216,9 @@ bytes and never calls the data generator.
 - Word frequency cannot infer the relative frequency of senses within a word.
 - Custom theme files and btop `.theme` imports are deferred; only built-in
   palettes are supported. No automatic light/dark detection or theme downloads.
+- The download lifecycle is a set of correlated flags (`download_enabled`,
+  `download_requested`, `download_cancelled`, `DownloadView.running`); collapse
+  it into one `DownloadState` when it next needs another branch.
 
 ## Maintainer builds and release checks
 
@@ -194,10 +226,15 @@ bytes and never calls the data generator.
 binaries with locked dependencies. `make clean-all` additionally removes only the
 repository's disposable artifacts/ and dist/ directories; data/ and user-installed
 packs remain. Incremental Cargo commands remain available separately.
-Ordinary CI checks main pushes and PRs with format/Python checks once, native
-macOS/Linux Rust and sample PTY checks, and Rust 1.88 compilation. Tag releases
+Ordinary CI checks main pushes and PRs with format, Python, and cargo-deny
+license/source checks once, native macOS/Linux Rust and sample PTY checks, and
+Rust 1.88 compilation. Tag releases
 retain all four native targets, validating programs against the sample pack on
 each platform. The shared complete dictionary is downloaded and verified once
 at assembly, including full entry verification using the Linux x86_64 program.
 Only program archives enter platform artifacts. Publication keeps four programs,
 one shared dictionary and combined checksums; manual dispatch never publishes.
+
+## Amendments
+- 2026-10-09 Soul/Spirit: added the first `## Soul` block, N1–N7 lineage with
+  checks, and F1–F4 Frame invariants; N1–N7 meaning is unchanged.

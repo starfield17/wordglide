@@ -6,6 +6,7 @@ check:
 	cargo clippy --locked --all-targets -- -D warnings
 	cargo test --locked --all-targets
 	cargo test --locked --doc
+	cargo deny --locked check
 	$(PYTHON) -m unittest discover -s scripts -p 'test_*.py' -v
 
 build:

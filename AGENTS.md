@@ -1,7 +1,7 @@
 # Project map
 
 Run `make check`: formatting, Clippy (all owned targets), Rust tests/doc tests,
-and Python pipeline tests. `make build` cleans Cargo outputs before building release binaries; `make clean`
+cargo-deny license/source policy, and Python pipeline tests. `make build` cleans Cargo outputs before building release binaries; `make clean`
 removes the Cargo target directory. `make clean-all` also removes disposable
 `artifacts/` and `dist/` outputs, while retaining `data/` and installed packs. Keep code, scripts, and Makefile portable: do
 not embed developer-specific paths, environment activation, or machine settings.
@@ -28,12 +28,16 @@ and mouse code POSIX and ANSI, and do not add Windows-only paths.
 - `scripts/terminal_interaction_smoke.py`: POSIX PTY reading navigation, menus, preferences, and mouse toggles.
 - `scripts/terminal_appearance_smoke.py`: PTY theme, save/retry, color-mode and restart checks.
 - `scripts/package.py`: validated program and shared-data release archives.
+- `scripts/test_boundaries.py`: source scans for the SPEC lineage checks the compiler
+  cannot express (N1 network locality, N7/F1 build-only pack writes, F4 installer).
+- `deny.toml`: `cargo deny check` dependency license/source policy; a `make check` input.
 - `.github/workflows/check.yml`: source checks, native sample PTY checks, and MSRV compilation.
 - `.github/workflows/release.yml`: tag-triggered native builds and publication.
 - `data-release.json`: pinned dictionary Release asset and checksum; CI input only.
 - `tests/`: public API and real pack integration scenarios.
+- `tests/fixtures/normalize.json`: normalization cases shared by the Rust and Python tests.
 - `SPEC.md`: accepted behaviors and performance targets.
 
 Runtime/build separation is explicit: `wordglide` opens prepared packs; explicit downloads install verified prebuilt bytes. Only
 `dict-build` and `scripts/prepare.py` write dictionary data. Review dependency
-and public export changes at the root manifest and `src/lib.rs`.
+and public export changes at the root manifest, `deny.toml`, and `src/lib.rs`.

@@ -109,8 +109,9 @@ CRC-checked before use. Complete SHA/index/database verification passed separate
   overrides: query editing, F2 download access, old-format/corrupt-pack diagnostics,
   invalid managed-receipt guidance, and terminal restoration. Local HTTP tests
   verify damaged receipts can be repaired while preserving them on failure/cancellation.
-- Formatting, Clippy with warnings denied, 126 Rust tests, two compile-fail
-  boundary doc tests, and 17 Python pipeline tests passed.
+- Formatting, Clippy with warnings denied, cargo-deny (advisories, bans,
+  licenses, sources), 126 Rust tests, two compile-fail boundary doc tests, and
+  25 Python pipeline tests passed.
 
 Full-pack terminal checks confirm `home` precedes `how-to`, `household` precedes
 `house-like`, exact `house-like` remains selected, and source POS summaries appear.

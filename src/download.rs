@@ -1,4 +1,7 @@
 //! Explicit installation of prebuilt packs. Lookup and pack generation do not call this module.
+//!
+//! F4 ← S2: the installer copies verified prebuilt bytes and never calls the data
+//! generator; scripts/test_boundaries.py fails if it references a pack encoder.
 use crate::{
     Dictionary,
     model::{Manifest, RANKING, SCHEMA_VERSION},

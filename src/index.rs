@@ -410,6 +410,7 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // F2 ← S3: indexed top-k must equal exhaustive fixed-score ranking.
     #[test]
     fn prefix_matches_exhaustive_oracle_with_ties() {
         let words: Vec<_> = (0..2000)

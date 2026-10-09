@@ -24,6 +24,8 @@ pub(crate) fn checksum(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
+// F1 ← S2 / F4 ← S2: only this builder produces pack bytes; the runtime and the
+// installer never call it. Enforced by scripts/test_boundaries.py.
 /// Assemble a pack from canonical source-grounded JSONL and its provenance JSON.
 /// Output must not exist. An interrupted build has no manifest and cannot be opened.
 pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> {

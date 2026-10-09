@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- The spec gains a Soul block and per-entry lineage: N1–N7 name a check or
+  review, the Frame invariants are F1–F4, and `scripts/test_boundaries.py`
+  enforces the boundary rules the compiler cannot express.
+- `make check` runs `cargo deny check` with `deny.toml`, gating dependency
+  license, advisory, and source policy.
+- Normalization cases are shared between `scripts/prepare.py` and the runtime
+  through `tests/fixtures/normalize.json`, so the two normalizers cannot drift.
+- Startup pack errors reuse one hint, restoring rustfmt coverage of the open path.
 - CI separates shared source checks from native program checks, adds MSRV
   compilation and Cargo caches, and verifies the complete shared dictionary once
   during release assembly. Platform artifacts contain only program archives.

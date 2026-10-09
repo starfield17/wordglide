@@ -45,10 +45,12 @@ class RankingTests(unittest.TestCase):
 
 
 class ExtractTests(unittest.TestCase):
-    def test_normalization(self):
-        self.assertEqual(normalize("  ＴＡＫＥ\tOff  "), "take off")
-        self.assertEqual(normalize("DON’T"), "don't")
-        self.assertNotEqual(normalize("résumé"), normalize("resume"))
+    def test_normalization_matches_shared_cross_language_cases(self):
+        # Shared with the runtime's normalize() unit test, so the builder and the
+        # lookup path cannot drift apart silently.
+        fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/normalize.json"
+        for raw, expected in json.loads(fixture.read_text()):
+            self.assertEqual(normalize(raw), expected, raw)
 
     def test_preserves_content_and_orders_historical_senses(self):
         raw = {"word": "Test", "lang_code": "en", "pos": "noun", "sounds": [{"ipa": "/test/"}],
