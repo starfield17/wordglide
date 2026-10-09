@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - The spec gains a Soul block and per-entry lineage: N1–N7 name a check or
   review, the Frame invariants are F1–F4, and `scripts/test_boundaries.py`
@@ -15,6 +15,9 @@
   during release assembly. Platform artifacts contain only program archives.
 - `make build` cleans Cargo outputs before building locked release binaries.
   `make clean-all` also removes disposable verification and packaging outputs.
+
+No runtime or public API changes; the schema-3 dictionary and all CLI flags are
+unchanged. New dependency-policy checks require `cargo-deny` for `make check`.
 
 ## 0.4.0
 
