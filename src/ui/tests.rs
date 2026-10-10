@@ -1,5 +1,5 @@
 use super::*;
-use crate::{Dictionary, build_pack};
+use crate::{Dictionary, app::DownloadState, build_pack};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     Terminal,
@@ -57,7 +57,7 @@ fn settings_download_is_a_modal_command_and_preserves_preferences_and_lookup() {
     let (_dir, dictionary) = dictionary();
     let mut app = App::new(dictionary, "fist");
     settle(&mut app);
-    app.download_enabled = true;
+    app.set_download_enabled(true);
     let before = (
         app.input.clone(),
         app.cursor,
@@ -76,13 +76,13 @@ fn settings_download_is_a_modal_command_and_preserves_preferences_and_lookup() {
     assert!(pointer.appearance_rows[6].height > 0);
     let row = pointer.appearance_rows[6];
     assert!(on_mouse(&mut app, &pointer, click(row.x, row.y)));
-    assert!(app.download_requested);
+    assert_eq!(app.download.state, DownloadState::Requested);
     assert_eq!(app.view.overlay, Overlay::Download);
     app.paste("ignored");
     stroke(&mut app, KeyCode::F(1));
     assert_eq!(app.view.overlay, Overlay::Download);
     stroke(&mut app, KeyCode::Esc);
-    assert!(app.download_cancelled);
+    assert_eq!(app.download.state, DownloadState::Cancelling);
     assert_eq!(
         (
             app.input.clone(),
@@ -1307,7 +1307,7 @@ fn unicode_styles_survive_controls_wrapping_and_hint_replacement() {
 #[test]
 fn missing_dictionary_keeps_settings_and_query_until_first_installation() {
     let mut app = App::without_dictionary("ho", "fixture: missing pack".into());
-    app.download_enabled = true;
+    app.set_download_enabled(true);
     assert!(!app.loading);
     assert!(!app.poll());
     assert!(!app.contains("house"));
@@ -1327,10 +1327,10 @@ fn missing_dictionary_keeps_settings_and_query_until_first_installation() {
         stroke(&mut app, KeyCode::Down);
     }
     stroke(&mut app, KeyCode::Enter);
-    assert!(app.download_requested);
+    assert_eq!(app.download.state, DownloadState::Requested);
     assert_eq!(app.view.overlay, Overlay::Download);
     stroke(&mut app, KeyCode::Esc);
-    assert!(app.download_cancelled);
+    assert_eq!(app.download.state, DownloadState::Cancelling);
     assert_eq!(app.input, "house");
     let preferences = app.reading_preferences();
     let appearance = app.appearance();
@@ -1362,10 +1362,10 @@ fn download_completion_opens_first_pack_and_keeps_active_reading_session() {
         already_current: false,
     };
     let mut app = App::without_dictionary("fist", "missing".into());
-    app.download.running = true;
+    app.download.state = DownloadState::Running;
     terminal::finish_download(&mut app, Err("cancelled".into()));
     assert!(!app.has_dictionary());
-    assert!(!app.download.running);
+    assert_eq!(app.download.state, DownloadState::Finished);
     assert!(app.download.message.contains("retry"));
     terminal::finish_download(
         &mut app,

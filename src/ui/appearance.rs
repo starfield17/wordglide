@@ -47,7 +47,7 @@ pub(super) fn render_download(frame: &mut Frame, app: &App, pointer: &mut Pointe
     let button = Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1);
     pointer.download_button = Region::from(button);
     frame.render_widget(
-        Paragraph::new(if app.download.running {
+        Paragraph::new(if app.download.state.is_active() {
             "Esc cancel · Ctrl+C quit"
         } else {
             "Enter / Esc return to Settings"

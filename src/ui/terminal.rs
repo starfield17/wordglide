@@ -1,4 +1,4 @@
-use crate::{App, AppearanceOverrides, Dictionary, config::ConfigStore};
+use crate::{App, AppearanceOverrides, Dictionary, app::DownloadState, config::ConfigStore};
 use anyhow::Result;
 use crossterm::{
     Command,
@@ -192,7 +192,7 @@ pub fn run_without_dictionary(query: &str, notice: String, options: RunOptions) 
 fn run_session(mut app: App, options: RunOptions) -> Result<()> {
     let (mut config, appearance) =
         ConfigStore::load(options.config_path.clone(), options.appearance)?;
-    app.download_enabled = crate::download::root().is_ok();
+    app.set_download_enabled(crate::download::root().is_ok());
     app.set_color(options.color);
     app.mouse_enabled = options.mouse;
     app.set_appearance(appearance);
@@ -222,25 +222,27 @@ fn run_session(mut app: App, options: RunOptions) -> Result<()> {
     let mut pointer = Pointer::default();
     let mut dirty = true;
     while !app.exit {
-        if app.download_requested {
-            app.download_requested = false;
+        if app.download.state == DownloadState::Requested {
             match Task::start() {
-                Ok(task) => download = Some(task),
+                Ok(task) => {
+                    download = Some(task);
+                    app.download.state = DownloadState::Running;
+                }
                 Err(error) => {
                     app.download.message = format!("Download failed: {error:#}");
-                    app.download.running = false;
+                    app.download.state = DownloadState::Finished;
                 }
             }
             dirty = true;
         }
         if let Some(task) = &download {
-            if app.download_cancelled {
+            if app.download.state == DownloadState::Cancelling {
                 task.cancel();
             }
             for update in task.poll() {
                 match update {
                     Progress::Info(message) => {
-                        if !app.download_cancelled {
+                        if app.download.state != DownloadState::Cancelling {
                             app.download.message = message;
                         }
                         app.download.total = 0;
@@ -255,7 +257,7 @@ fn run_session(mut app: App, options: RunOptions) -> Result<()> {
                 }
                 dirty = true;
             }
-            if !app.download.running {
+            if !app.download.state.is_active() {
                 download = None;
             }
         }
@@ -312,7 +314,7 @@ fn run_session(mut app: App, options: RunOptions) -> Result<()> {
 }
 
 pub(super) fn finish_download(app: &mut App, result: Result<crate::download::Installed, String>) {
-    app.download.running = false;
+    app.download.state = DownloadState::Finished;
     app.download.total = 0;
     app.download.message = match result {
         Ok(installed) => {

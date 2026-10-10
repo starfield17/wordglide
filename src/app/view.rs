@@ -24,12 +24,41 @@ pub(crate) enum Overlay {
     Download,
 }
 
+/// Lifecycle state of the dictionary downloader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DownloadState {
+    #[default]
+    Disabled,
+    Idle,
+    Requested,
+    Running,
+    Cancelling,
+    Finished,
+}
+
+impl DownloadState {
+    /// True while a download task is requested, running, or completing cancellation.
+    pub(crate) fn is_active(self) -> bool {
+        matches!(self, Self::Requested | Self::Running | Self::Cancelling)
+    }
+
+    /// True if the user can request cancellation (task is requested or running).
+    pub(crate) fn is_cancellable(self) -> bool {
+        matches!(self, Self::Requested | Self::Running)
+    }
+
+    /// True if download capability is available in this session.
+    pub(crate) fn is_enabled(self) -> bool {
+        self != Self::Disabled
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct DownloadView {
+    pub(crate) state: DownloadState,
     pub(crate) message: String,
     pub(crate) downloaded: u64,
     pub(crate) total: u64,
-    pub(crate) running: bool,
 }
 
 impl ViewOptions {

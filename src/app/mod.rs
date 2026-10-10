@@ -14,7 +14,7 @@ pub(crate) use actions::Action;
 use completion::Completion;
 pub(crate) use reading::{Anchor, ReadingState};
 pub(crate) use reading::{LogicalLine, TextRole, TextRow, document};
-pub(crate) use view::{Overlay, ViewOptions};
+pub(crate) use view::{DownloadState, Overlay, ViewOptions};
 pub use view::{ReadingLayout, ReadingPreferences};
 use worker::{Request, Response};
 
@@ -41,9 +41,6 @@ struct Location {
 }
 
 pub struct App {
-    pub(crate) download_enabled: bool,
-    pub(crate) download_requested: bool,
-    pub(crate) download_cancelled: bool,
     pub(crate) download: view::DownloadView,
     pub input: String,
     pub cursor: usize,
@@ -97,9 +94,6 @@ impl App {
             None => (None, None),
         };
         let mut app = Self {
-            download_enabled: false,
-            download_requested: false,
-            download_cancelled: false,
             download: view::DownloadView::default(),
             input: query.into(),
             cursor: query.len(),
@@ -184,20 +178,26 @@ impl App {
         }
     }
 
+    pub(crate) fn set_download_enabled(&mut self, enabled: bool) {
+        self.download.state = if enabled {
+            DownloadState::Idle
+        } else {
+            DownloadState::Disabled
+        };
+    }
+
     pub(crate) fn start_download(&mut self) {
         self.view.overlay = Overlay::Download;
-        self.download_cancelled = false;
-        self.download = view::DownloadView {
-            message: if self.download_enabled {
-                "Preparing download…"
-            } else {
-                "Downloads are available in the Wordglide terminal session"
-            }
-            .into(),
-            running: self.download_enabled,
-            ..Default::default()
-        };
-        self.download_requested = self.download_enabled;
+        self.download.downloaded = 0;
+        self.download.total = 0;
+        if self.download.state.is_enabled() {
+            self.download.state = DownloadState::Requested;
+            self.download.message = "Preparing download…".into();
+        } else {
+            self.download.state = DownloadState::Disabled;
+            self.download.message =
+                "Downloads are available in the Wordglide terminal session".into();
+        }
     }
 
     /// Render without color; equivalent to `set_color(false)`.

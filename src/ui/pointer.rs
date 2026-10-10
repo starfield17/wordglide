@@ -1,6 +1,6 @@
 use crate::{
     App, Focus,
-    app::{Action, Overlay},
+    app::{Action, DownloadState, Overlay},
 };
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -140,10 +140,10 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
         if mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && pointer.download_button.contains(mouse.column, mouse.row)
         {
-            if app.download.running {
-                app.download_cancelled = true;
+            if app.download.state.is_cancellable() {
+                app.download.state = DownloadState::Cancelling;
                 app.download.message = "Cancelling download…".into();
-            } else {
+            } else if !app.download.state.is_active() {
                 app.view.overlay = Overlay::Appearance;
             }
             return true;

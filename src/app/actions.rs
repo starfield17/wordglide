@@ -281,12 +281,12 @@ impl App {
                 _ => {}
             },
             Overlay::Download => match key.code {
-                KeyCode::Esc if self.download.running => {
-                    self.download_cancelled = true;
+                KeyCode::Esc if self.download.state.is_cancellable() => {
+                    self.download.state = DownloadState::Cancelling;
                     self.download.message = "Cancelling download…".into();
                 }
-                KeyCode::Esc | KeyCode::Enter if !self.download.running => {
-                    self.view.overlay = Overlay::Appearance
+                KeyCode::Esc | KeyCode::Enter if !self.download.state.is_active() => {
+                    self.view.overlay = Overlay::Appearance;
                 }
                 _ => {}
             },

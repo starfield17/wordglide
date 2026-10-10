@@ -245,9 +245,6 @@ bytes and never calls the data generator.
 - Word frequency cannot infer the relative frequency of senses within a word.
 - Custom theme files and btop `.theme` imports are deferred; only built-in
   palettes are supported. No automatic light/dark detection or theme downloads.
-- The download lifecycle is a set of correlated flags (`download_enabled`,
-  `download_requested`, `download_cancelled`, `DownloadView.running`); collapse
-  it into one `DownloadState` when it next needs another branch.
 
 ## Maintainer builds and release checks
 
