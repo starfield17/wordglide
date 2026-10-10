@@ -103,6 +103,15 @@ above the last good definition. Existing phrases included. Navigation history
 persists as reading preferences and does not affect ranking.
 Long entries: Ctrl+J/K scrolls one line in reading focus; arrows continue selecting
 candidates. [/] jumps between source groups, and o opens the source-group outline.
+Where source groups contain distinct etymology numbers, group headers and outline
+entries display [Etym n]; opening the outline preselects the active reading section.
+Space in definition focus or Alt+P from any focus opens a transient candidate peek
+card overlay. The peek card previews the selected candidate's headword, POS, first
+gloss, and short example on demand without altering the current query, candidate
+selection, outline, reading scroll position, or session history. Up/Down,
+Ctrl+P/N, Tab/Shift+Tab, and Home/End cycle peek candidates; Enter or a mouse click
+promotes the candidate to full reading; Esc or an outside click dismisses the card
+and restores the prior reading view.
 F4 switches split/focus reading, default split. Focus hides only the candidate
 pane while the definition is focused; input restores it. Text columns cap at 96.
 / searches only currently displayed source content with case-insensitive literal
@@ -264,3 +273,5 @@ one shared dictionary and combined checksums; manual dispatch never publishes.
 ## Amendments
 - 2026-10-09 Soul/Spirit: added the first `## Soul` block, N1–N7 lineage with
   checks, and F1–F4 Frame invariants; N1–N7 meaning is unchanged.
+- 2026-10-10 Spirit: etymology branch outline navigation and candidate peek
+  card overlay; non-destructive preview preserves reading position and history.

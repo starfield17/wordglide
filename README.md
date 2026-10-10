@@ -25,9 +25,10 @@ example coverage and is not equivalent to Oxford's learner-oriented editing.
   to look up words within a definition. Session back/forward navigation restores
   the query, selection, focus, and reading position. See [navigation keys](#keys).
 - **Read long entries comfortably.** Switch between split and focused reading,
-  find text in the displayed definition, jump through its outline, and expand
-  examples, references, or IPA. See [reading long entries](#reading-long-entries).
-- **Make the terminal comfortable.** Five themes, saved reading preferences,
+  find text in the displayed definition, jump through its outline with etymology
+  branches, peek candidate summaries with Space/Alt+P, and expand examples,
+  references, or IPA. See [reading long entries](#reading-long-entries).
+- **Make the terminal comfortable.** Nine themes, saved reading preferences,
   truecolor and 256-color support, a no-color mode, searchable actions, keyboard
   help, mouse controls, and grapheme-aware editing. See [Settings and
   appearance](#settings-and-appearance) and [finding actions](#finding-actions).
@@ -171,10 +172,20 @@ Changing words clears the search. Follow hints temporarily take precedence over
 search highlighting.
 
 Press **o** for the word / part-of-speech outline, or **[ / ]** for the previous /
-next group. **Ctrl+J/K** scrolls one line down/up; ↑/↓ continues selecting
+next group. For entries with multiple etymologies, section headers and outline
+rows display `[Etym n]` branches, and opening the outline preselects the active
+section. **Ctrl+J/K** scrolls one line down/up; ↑/↓ continues selecting
 candidates. PageUp/PageDown and the wheel retain their existing behavior.
 **F4** toggles split / focused reading. Focused reading hides candidates while
 you read; returning to input shows them again. Lines are at most 96 columns.
+
+Press **Space** in reading focus (or **Alt+P** from any focus) to open a floating
+**candidate peek card**. The peek card previews the selected candidate's headword,
+part of speech, primary definition, and an example on demand without altering your
+scroll position or session history. Press ↑/↓, Ctrl+P/Ctrl+N, Tab/Shift+Tab,
+or Home/End to compare other candidates. Press **Enter** or click the card to
+read that entry in full; press **Esc** or click outside to dismiss the card and
+return to your reading place.
 
 Resizing, expanding examples/IPA, and switching layouts retain your current
 source sense where possible. Collapsing an example you were reading returns to
@@ -318,7 +329,8 @@ data and code licenses.
 | Ctrl+G / F3 | Search and run available actions |
 | / in definition | Find displayed text; Enter keeps, Esc restores position |
 | n / N in definition | Next / previous match |
-| o in definition | Jump through the definition outline |
+| o in definition | Jump through the definition outline (shows [Etym n] branches) |
+| Space in definition / Alt+P | Peek candidate card; ↑/↓ compare, Enter read, Esc close |
 | [ / ] in definition | Previous / next word or part-of-speech group |
 | Ctrl+J / Ctrl+K in definition | Scroll one line down / up |
 | F4 | Toggle split / focused reading |

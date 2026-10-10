@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Etymology branches: entries with multiple etymologies show `[Etym n]` in group
+  headers and in the outline view (`o`), making homographs easy to navigate.
+  Opening the outline automatically preselects the active reading section.
+- Candidate peek card (`Space` in definition focus / `Alt+P` in any focus): opens
+  a floating card previewing candidate definitions on demand without changing
+  the active query, scroll position, outline, or session history. Supports candidate
+  cycling (`↑`/`↓`, `Ctrl+P`/`Ctrl+N`, `Tab`/`Shift+Tab`, `Home`/`End`), instant
+  promotion to full reading with `Enter` or mouse click, and dismissal with `Esc`.
+- Four new terminal color themes: `nord` (arctic blue), `tokyo_night` (deep indigo),
+  `dracula` (dark purple), and `sepia` (warm parchment), bringing the built-in
+  palettes to nine.
+- Unified download state machine: download lifecycle flags in the UI state are
+  collapsed into an explicit `DownloadState` enum with atomic transitions.
+
 ## 0.4.2
 
 - Schema 4 replaces SQLite and per-entry zlib with flat entry storage,
