@@ -1,7 +1,7 @@
 {
-  "tag": "data-v3-20260902",
-  "asset": "english-pack.tar.gz",
-  "sha256": "d877d75265d26ef7c7d1c9bbedddd452db9c7fdbcca792631655841f059a6d15",
-  "schema_version": 3,
+  "tag": "data-v4-20260902",
+  "asset": "english-pack.tar.xz",
+  "sha256": "5b2a03f626dbe06673ea010e156efba76828a5a40f6fba3c48ed19fd273d54b8",
+  "schema_version": 4,
   "snapshot": "2026-09-02"
 }

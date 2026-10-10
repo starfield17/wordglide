@@ -110,7 +110,8 @@ True Rust 1.88 all-target compilation and Intel macOS cross-target checking
 passed; runtime testing was performed on native ARM64 macOS. Native Linux and
 all four release builds remain CI checks and were not executed locally.
 
-The new data archive is a local validated artifact. Public publication is
-separate: publish schema 4 and its checksum first, then update `data-release.json`
-with the real published tag before releasing the program. The existing pin still
-accurately names the published schema-3 asset; schema 2/3 is not converted at runtime.
+The validated data archive is published as
+[data-v4-20260902](https://github.com/starfield17/wordglide/releases/tag/data-v4-20260902)
+and pinned in `data-release.json`. Future data updates must publish and verify
+the archive and checksum before changing that pin. Schema 2/3 is not converted
+at runtime; update the program and install a schema-4 dictionary.

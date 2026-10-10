@@ -535,11 +535,12 @@ an early reference for Wordglide's first version, and to its author for sharing
 the project. Wordglide is independently implemented; no tuidict code is
 incorporated.
 
-## Schema-4 release handoff
+## Updating to schema 4
 
-Source builds require schema 4. Use a locally built pack with `--data` until the
-new dictionary asset is published. The currently pinned `data-release.json` still
-identifies the published schema-3 asset; it must not be changed to an unpublished
-tag. Publish the validated `english-pack.tar.xz` and checksum first, then update
-the pin with the real data release tag, schema 4, and SHA-256 before releasing
-the new program. Old programs cannot read schema 4 and must also be updated.
+Wordglide v0.4.2 requires a schema-4 dictionary. Update the program, then use
+F2 Settings or `wordglide --download-data` to install the new pack. If `--data`
+or `WORDGLIDE_DATA` is set, update that override to a schema-4 pack as well.
+The validated dictionary is published as
+[data-v4-20260902](https://github.com/starfield17/wordglide/releases/tag/data-v4-20260902)
+and pinned in `data-release.json` with its real asset checksum. Old programs
+cannot read schema 4; older program/data pairs remain usable separately.
