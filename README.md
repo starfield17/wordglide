@@ -192,11 +192,12 @@ changes made with F4, e, and p. Esc or F2 closes the panel and keeps your choice
 on the download row, Enter or Space starts the download. Lookup, selection,
 reading position, and navigation history are preserved.
 
-Five built-in palettes are available: `default` (terminal colors with cyan
+Nine built-in palettes are available: `default` (terminal colors with cyan
 accents), `orange` (black and warm amber), `gruvbox_light` (cream),
-`gruvbox_dark_v2` (warm dark gray), and `whiteout` (white with blue accents).
-The latter four are reading-oriented adaptations of
-[btop palettes](https://github.com/aristocratos/btop/tree/main/themes).
+`gruvbox_dark_v2` (warm dark gray), `whiteout` (white with blue accents),
+`nord` (arctic cold blue and frost cyan), `tokyo_night` (deep indigo night
+with sky blue accents), `dracula` (dark purple with green highlights), and
+`sepia` (warm parchment with roasted coffee text).
 Headwords are emphasized separately from part of speech and IPA; examples and
 source references use secondary colors. Panes have rounded borders.
 

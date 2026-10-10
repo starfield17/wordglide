@@ -135,8 +135,8 @@ Wide candidate panes use 24% of terminal width clamped to 20–36 columns,
 independent of results. Candidate markers and the status line distinguish exact,
 prefix, word-form, and fuzzy matches; footer shortcuts are clickable. The menu
 can toggle mouse capture for the session; --no-mouse sets its initial state.
-Appearance: five built-in palettes (`default`, `orange`, `gruvbox_light`,
-`gruvbox_dark_v2`, `whiteout`), the latter four adapted from btop for reading.
+Appearance: nine built-in palettes (`default`, `orange`, `gruvbox_light`,
+`gruvbox_dark_v2`, `whiteout`, `nord`, `tokyo_night`, `dracula`, `sepia`), adapted for reading.
 Headword emphasis is separate from POS/IPA; examples and sources use readable
 secondary colors. Panes use rounded borders without changing layout density.
 F2 opens a modal Settings panel from either focus, exclusive with key help.

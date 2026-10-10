@@ -33,7 +33,7 @@ struct Args {
     /// Disable mouse capture, keeping native terminal text selection.
     #[arg(long)]
     no_mouse: bool,
-    /// Reading palette: default, orange, gruvbox_light, gruvbox_dark_v2, whiteout.
+    /// Reading palette: default, orange, gruvbox_light, gruvbox_dark_v2, whiteout, nord, tokyo_night, dracula, sepia.
     #[arg(long)]
     theme: Option<ThemePreset>,
     /// Use the theme's background instead of the terminal background.

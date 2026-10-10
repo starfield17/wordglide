@@ -12,15 +12,23 @@ pub enum ThemePreset {
     GruvboxLight,
     GruvboxDarkV2,
     Whiteout,
+    Nord,
+    TokyoNight,
+    Dracula,
+    Sepia,
 }
 
 impl ThemePreset {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 9] = [
         Self::Default,
         Self::Orange,
         Self::GruvboxLight,
         Self::GruvboxDarkV2,
         Self::Whiteout,
+        Self::Nord,
+        Self::TokyoNight,
+        Self::Dracula,
+        Self::Sepia,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -30,6 +38,10 @@ impl ThemePreset {
             Self::GruvboxLight => "gruvbox_light",
             Self::GruvboxDarkV2 => "gruvbox_dark_v2",
             Self::Whiteout => "whiteout",
+            Self::Nord => "nord",
+            Self::TokyoNight => "tokyo_night",
+            Self::Dracula => "dracula",
+            Self::Sepia => "sepia",
         }
     }
 
@@ -52,7 +64,7 @@ impl FromStr for ThemePreset {
     type Err = String;
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::ALL.into_iter().find(|preset| preset.as_str() == value)
-            .ok_or_else(|| format!("Unknown theme {value:?}; choose default, orange, gruvbox_light, gruvbox_dark_v2, or whiteout"))
+            .ok_or_else(|| format!("Unknown theme {value:?}; choose default, orange, gruvbox_light, gruvbox_dark_v2, whiteout, nord, tokyo_night, dracula, or sepia"))
     }
 }
 
@@ -160,6 +172,18 @@ impl Theme {
                 ),
                 ThemePreset::Whiteout => (
                     0xffffff, 0x303030, 0x284d75, 0x666666, 0x15283d, 0xffffff, 0xb00020,
+                ),
+                ThemePreset::Nord => (
+                    0x2e3440, 0xeceff4, 0x88c0d0, 0x81a1c1, 0x434c5e, 0x88c0d0, 0xbf616a,
+                ),
+                ThemePreset::TokyoNight => (
+                    0x1a1b26, 0xc0caf5, 0x7aa2f7, 0x7982a9, 0x283457, 0x7aa2f7, 0xf7768e,
+                ),
+                ThemePreset::Dracula => (
+                    0x282a36, 0xf8f8f2, 0xbd93f9, 0x8090c0, 0x44475a, 0x50fa7b, 0xff5555,
+                ),
+                ThemePreset::Sepia => (
+                    0xfbf0d9, 0x433422, 0x9e5018, 0x7d6854, 0xedd7b4, 0x9e5018, 0xa82424,
                 ),
             };
         Palette {

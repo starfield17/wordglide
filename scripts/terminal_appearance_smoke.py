@@ -100,7 +100,17 @@ def main():
             assert not list(root.rglob("config.json")), "Startup must not create configuration"
             session.send(b"\x1bOQ")  # xterm F2
             session.wait(lambda: b"Settings" in session.output, "settings panel")
-            for theme in ["orange", "gruvbox_light", "gruvbox_dark_v2", "whiteout", "default"]:
+            for theme in [
+                "orange",
+                "gruvbox_light",
+                "gruvbox_dark_v2",
+                "whiteout",
+                "nord",
+                "tokyo_night",
+                "dracula",
+                "sepia",
+                "default",
+            ]:
                 session.send(b"\x1b[C")
                 session.wait(lambda: preferences().get("color_theme") == theme, f"saved {theme}")
             session.send(b"\x1b[C")  # orange
@@ -169,7 +179,7 @@ def main():
             result = subprocess.run(command[:-1] + [operation], env=env, capture_output=True, timeout=5)
             assert result.returncode == 0, result.stderr
             assert b"\x1b[?1049h" not in result.stdout
-        print("PASS: five themes, atomic auto-save/retry, restart, overrides, 256 colors, NO_COLOR, narrow panel, and PTY restoration")
+        print("PASS: nine themes, atomic auto-save/retry, restart, overrides, 256 colors, NO_COLOR, narrow panel, and PTY restoration")
 
 
 if __name__ == "__main__":
