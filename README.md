@@ -68,7 +68,7 @@ POSIX terminals are exercised.
 Each release provides two download types:
 
 - **Program only:** `wordglide-vVERSION-TARGET.tar.gz`.
-- **Dictionary only:** `english-pack.tar.gz`, shared by all platforms.
+- **Dictionary only:** `english-pack.tar.xz`, shared by all platforms.
 
 For separate downloads, extract the program, then extract the dictionary into
 the resulting `wordglide/` directory. `english-pack/` must sit beside the
@@ -77,7 +77,7 @@ Linux executables use static musl linking; macOS executables use system librarie
 
 ## Install from crates.io
 
-Requires Rust 1.88 or newer and a C compiler for bundled SQLite:
+Requires Rust 1.88 or newer and a C compiler for bundled Zstd:
 
 ```sh
 cargo install wordglide --locked
@@ -104,16 +104,16 @@ Downloads live in the platform user-data directory under `downloads/packs`,
 with `downloads/current.json` selecting an immutable pack. Linux uses
 `$XDG_DATA_HOME/dict` (or `~/.local/share/dict`); macOS uses
 `~/Library/Application Support/org.wordglide.dict`. Older installed versions are
-retained; the schema-3 reference archive is about 429 MiB and each installed
-full dictionary about 608 MiB. Independent entry compression roughly halves
-installed storage but makes the download larger than schema 2's roughly 190 MiB
-archive because the outer archive shares less redundancy across definitions.
+retained; the schema-4 reference archive is about 127 MiB and each installed
+full dictionary about 184 MiB. Small independent Zstd blocks share a trained
+compression dictionary; the XZ download envelope is extracted once at installation.
+Historical installed packs still take space until removed manually.
 The data's attribution and licenses ship in its `THIRD_PARTY.md`.
 The program is MIT licensed; the dictionary keeps its separate source licenses.
 
 ## Build and try the real-data sample
 
-Requires a Rust toolchain and a C toolchain for bundled SQLite. The project pins
+Requires a Rust toolchain and a C toolchain for bundled Zstd. The project pins
 Rust 1.99.0 for reproducible development and CI; package MSRV is 1.88,
 verified with the packaged source and tests. Supported environments are
 macOS and Linux terminals; Windows is out of scope for now.
@@ -267,8 +267,8 @@ real input; it does not accept the prediction.
 
 ## Verify a data pack
 
-Normal startup checks schema, file lengths, compact-index layout, and database
-structure. It does not hash the dictionary or run a full SQLite integrity scan.
+Normal startup checks schema, file lengths, compact-index and entry-locator headers. It does not hash the dictionary,
+walk the vocabulary, or decompress definition blocks.
 The small, already-loaded FST buffer receives its built-in CRC check to reject
 accidentally damaged nodes before traversal.
 
@@ -279,11 +279,11 @@ wordglide --verify-data --data PACK_DIRECTORY
 ```
 
 This checks all SHA-256 receipts, vocabulary/index agreement, prebuilt ranking,
-SQLite integrity, every compressed entry, and entry/index headword, score, and
+block/locator coverage, every compressed block and entry, and entry/index headword, score, and
 part-of-speech agreement, prints the entry count and elapsed time, then exits without
 opening the TUI. Omit `--data` to verify the automatically selected pack.
 Successful verification exits with status 0; errors exit with a nonzero status.
-Schema 3 packs are required; schema 2 packs must be replaced with a newly built or
+Schema 4 packs are required; schema 2/3 packs must be replaced with a newly built or
 downloaded pack. If an old pack remains selected, check `--data` and
 `WORDGLIDE_DATA`, which take precedence over managed downloads.
 
@@ -390,20 +390,25 @@ hyphenated words. Normalization and dictionary coverage do not change.
 
 The compact binary vocabulary and prebuilt range-max tree return prefix top-k
 without sorting all prefix matches. The builder writes `lexicon.bin`: a versioned
-32-byte header, 28-byte candidate records, a little-endian u32 ranking tree, and
-shared UTF-8 strings including interned, NUL-separated part-of-speech lists.
-Candidate labels are sorted and deduplicated across all source groups. The UI
-shows up to two abbreviations and marks omitted labels; narrow rows preserve
-word space and match markers before the POS summary.
-Runtime loads this buffer and the FST once, without parsing
-candidate JSON, creating millions of string objects, or rebuilding the tree.
-Only returned candidates allocate strings. An FST handles exact and fuzzy matching. A read-only SQLite database stores
-structured words, parts of speech, pronunciation, senses, source examples, and
-word forms as independent zlib-level-6 JSON BLOBs with their original byte length.
-Only requested entries and necessary word-form targets are decompressed; startup
-does not unpack the dictionary. Raw entries are limited to 1 MiB and compressed
-input to 2 MiB, with complete-stream, checksum, length, JSON, and key validation.
-A 32 MiB cache holds parsed visited entries, charged against uncompressed size.
+32-byte header, 24-byte candidate records, prebuilt internal ranking nodes,
+a table of interned POS ranges, and shared UTF-8 strings. Ranking leaves are
+implicit candidate IDs. Candidate labels are sorted and deduplicated across all
+source groups. The UI shows up to two abbreviations and marks omitted labels;
+narrow rows preserve word space and match markers before the POS summary.
+Runtime loads this buffer and the FST once without parsing candidate JSON,
+creating millions of string objects, or rebuilding the tree. Only returned
+candidates allocate strings. An FST handles exact and fuzzy matching.
+
+Schema 4 replaces SQLite with `entries.bin` and `entries.idx`. The latter stores
+an up-to-64-KiB trained dictionary, block directory, and eight-byte candidate
+locators. Definition fields use a fixed-order, private MessagePack encoding;
+public JSON serialization is unchanged. Independently checksummed Zstd-level-19
+blocks contain at most 1 MiB of uncompressed entries. A lookup decompresses
+only its block and parses only the requested entry. A byte-bounded 8 MiB block
+cache complements the 32 MiB parsed-entry cache, which counts owned vector and
+string capacities. Startup never decompresses entries. Frame length, checksum,
+window, tails, MessagePack lengths/depth, locator ranges, and entry keys are checked.
+Raw entries are bounded to 1 MiB, compressed blocks to 2 MiB.
 A worker coalesces pending
 queries; response IDs stop obsolete previews from overwriting newer input.
 
@@ -420,7 +425,7 @@ python3 scripts/prepare.py --prepared data/old-prepared --output data/prepared-v
 ```
 
 The builder rejects prepared provenance carrying an old ranking policy. Rebuild
-both the pack and its release archive; schema 2 is not converted at runtime.
+both the pack and its release archive; schema 2/3 is not converted at runtime.
 
 ## Build the full data pack
 
@@ -529,3 +534,12 @@ Thanks to [404Simon/tuidict](https://github.com/404Simon/tuidict) for providing
 an early reference for Wordglide's first version, and to its author for sharing
 the project. Wordglide is independently implemented; no tuidict code is
 incorporated.
+
+## Schema-4 release handoff
+
+Source builds require schema 4. Use a locally built pack with `--data` until the
+new dictionary asset is published. The currently pinned `data-release.json` still
+identifies the published schema-3 asset; it must not be changed to an unpublished
+tag. Publish the validated `english-pack.tar.xz` and checksum first, then update
+the pin with the real data release tag, schema 4, and SHA-256 before releasing
+the new program. Old programs cannot read schema 4 and must also be updated.

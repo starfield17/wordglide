@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import gzip
 import hashlib
 import json
+import lzma
 from pathlib import Path
 import re
 import shutil
@@ -12,10 +13,35 @@ import tarfile
 import tomllib
 from prepare import POLICY
 
-DATA_FILES = ("entries.sqlite", "words.fst", "lexicon.bin")
+DATA_FILES = ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")
 DATA_MEMBERS = {"english-pack/" + name for name in
                 ("manifest.json", *DATA_FILES, "THIRD_PARTY.md")}
 DOCS = ("README.md", "LICENSE", "THIRD_PARTY.md", "PERFORMANCE.md")
+
+
+class XzStream:
+    """One bounded XZ stream, including its footer; reject concatenation/tails."""
+
+    def __init__(self, source):
+        self.source = source
+        self.decoder = lzma.LZMADecompressor(format=lzma.FORMAT_XZ, memlimit=128 * 1024 * 1024)
+        self.finished = False
+
+    def read(self, size):
+        result = bytearray()
+        try:
+            while len(result) < size and not self.finished:
+                block = self.source.read(65536) if self.decoder.needs_input else b""
+                if self.decoder.needs_input and not block:
+                    raise ValueError("Truncated XZ archive")
+                result.extend(self.decoder.decompress(block, max_length=size - len(result)))
+                if self.decoder.eof:
+                    if self.decoder.unused_data or self.source.read(1):
+                        raise ValueError("Trailing XZ archive data")
+                    self.finished = True
+        except lzma.LZMAError as error:
+            raise ValueError("Invalid XZ archive") from error
+        return bytes(result)
 
 
 def checksum(path):
@@ -39,17 +65,25 @@ def portable_metadata(info):
 @contextmanager
 def archive_writer(path):
     with path.open("wb") as raw:
-        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed:
+        compressor = (lzma.LZMAFile(raw, mode="wb", preset=9) if path.suffix == ".xz"
+                      else gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0))
+        with compressor as compressed:
             with tarfile.open(fileobj=compressed, mode="w|") as tar:
                 yield tar
 
 
 def validate_data_archive(path):
+    with path.open("rb") as compressed:
+        stream = XzStream(compressed)
+        return _validate_data_stream(stream)
+
+
+def _validate_data_stream(stream):
     manifest = None
     seen = set()
     hashes = {}
     sizes = {}
-    with tarfile.open(path, "r|gz") as tar:
+    with tarfile.open(fileobj=stream, mode="r|") as tar:
         for member in tar:
             if not member.isfile() or member.name not in DATA_MEMBERS or member.name in seen:
                 raise ValueError("Unexpected, duplicate, or unsafe data archive member")
@@ -68,7 +102,9 @@ def validate_data_archive(path):
                 for block in iter(lambda: source.read(1024 * 1024), b""):
                     h.update(block)
                 hashes[name] = h.hexdigest()
-    if (seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 3
+    while stream.read(1024 * 1024):
+        pass
+    if (seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 4
             or manifest.get("ranking") != POLICY):
         raise ValueError("Incomplete data archive or unsupported schema")
     if manifest.get("candidate_count", 0) <= 0:
@@ -135,7 +171,7 @@ def release_notes(tag, manifest):
         "Download the program archive for your platform, extract it, and run `./wordglide/wordglide`. "
         "Use F2 Settings or `./wordglide/wordglide --download-data` to install the latest dictionary. "
         "Installed lookup stays offline.\n\n"
-        "The shared `english-pack.tar.gz` is also provided for manual installation. "
+        "The shared `english-pack.tar.xz` is also provided for manual installation. "
         "Extract it into the program directory so `english-pack/` sits beside the executable. "
         "Verify downloads with `SHA256SUMS.txt`.\n\n"
         "Supports macOS 11+ (Intel/ARM64) and Linux (x86_64/ARM64, static musl executables).\n\n"
@@ -166,7 +202,7 @@ def main():
         raise ValueError("Build the Wordglide release executable first")
     if args.pack:
         manifest = json.loads((args.pack / "manifest.json").read_text())
-        if manifest.get("schema_version") != 3 or manifest.get("ranking") != POLICY:
+        if manifest.get("schema_version") != 4 or manifest.get("ranking") != POLICY:
             raise ValueError("Unsupported pack schema or ranking")
         for name in DATA_FILES:
             if checksum(args.pack / name) != manifest["files"][name]:
@@ -176,7 +212,7 @@ def main():
     elif args.data_archive:
         validate_data_archive(args.data_archive)
     args.output.mkdir(parents=True, exist_ok=False)
-    archive = args.output / "english-pack.tar.gz"
+    archive = args.output / "english-pack.tar.xz"
     if args.pack:
         with archive_writer(archive) as tar:
             for name in ("manifest.json", *DATA_FILES):
@@ -190,7 +226,7 @@ def main():
         tar.add(args.binaries / "wordglide", arcname="wordglide/wordglide", filter=portable_metadata)
         for doc in DOCS:
             tar.add(root / doc, arcname="wordglide/" + doc, filter=portable_metadata)
-    receipts = {path.name: checksum(path) for path in sorted(args.output.glob("*.tar.gz"))}
+    receipts = {path.name: checksum(path) for path in sorted(args.output.glob("*.tar.*"))}
     (args.output / "SHA256SUMS.txt").write_text("".join(f"{value}  {name}\n" for name, value in receipts.items()))
     print(json.dumps(receipts, indent=2))
 

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.2
+
+- Schema 4 replaces SQLite and per-entry zlib with flat entry storage,
+  independent checksummed Zstd blocks, a trained compression dictionary, and
+  lossless fixed-order MessagePack. Compact POS IDs and implicit ranking leaves
+  reduce the search index while preserving the public Rust API and JSON shape.
+- The same full dictionary now occupies about 184 MiB locally instead of
+  608 MiB. The shared download switches to `english-pack.tar.xz`, about 127 MiB
+  instead of 429 MiB; program archives remain gzip.
+- Lookup decodes only the requested block, with bounded raw-block and entry
+  caches. Full-data paired startup and uncached lookup P95 increases remained
+  below 5 ms; all 1,355,084 entries were checked against canonical source data.
+- Installation verifies XZ integrity, archive and member hashes, and pack
+  structure before atomic activation. Corrupt frames, locators, dictionaries,
+  malicious wire lengths, and damaged archive footers have regression coverage.
+- `dict-bench --queries FILE` supports reproducible paired query measurements;
+  PERFORMANCE.md records full-data sizes, latency, and validation limits.
+
+Schema 2/3 packs are rejected. After updating the program, download the new
+dictionary with F2 Settings or `wordglide --download-data`. Explicit `--data`
+and `WORDGLIDE_DATA` overrides must point to a schema-4 pack. Older installed
+packs remain on disk; old program/data pairs can still be used separately.
+
 ## 0.4.1
 
 - The spec gains a Soul block and per-entry lineage: N1–N7 name a check or

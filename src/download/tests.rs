@@ -72,15 +72,15 @@ impl Server {
             worker: Some(worker),
         };
         let release = serde_json::json!({"tag_name":"v1.0.0", "assets":[
-            {"name":"english-pack.tar.gz","size":archive.len(),"browser_download_url":format!("{base}/assets/v1.0.0/english-pack.tar.gz")},
+            {"name":"english-pack.tar.xz","size":archive.len(),"browser_download_url":format!("{base}/assets/v1.0.0/english-pack.tar.xz")},
             {"name":"SHA256SUMS.txt","size":84,"browser_download_url":format!("{base}/assets/v1.0.0/SHA256SUMS.txt")}
         ]});
         server.put("/latest", serde_json::to_vec(&release).unwrap());
         server.put(
             "/assets/v1.0.0/SHA256SUMS.txt",
-            format!("{:x}  english-pack.tar.gz\n", Sha256::digest(&archive)).into_bytes(),
+            format!("{:x}  english-pack.tar.xz\n", Sha256::digest(&archive)).into_bytes(),
         );
-        server.put("/assets/v1.0.0/english-pack.tar.gz", archive);
+        server.put("/assets/v1.0.0/english-pack.tar.xz", archive);
         server
     }
     fn put(&self, path: &str, body: Vec<u8>) {
@@ -109,11 +109,12 @@ fn pack() -> tempfile::TempDir {
     dir
 }
 fn archive(pack: &Path, extra: Option<(&str, tar::EntryType)>) -> Vec<u8> {
-    let gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
-    let mut builder = tar::Builder::new(gzip);
+    let xz = lzma_rust2::XzWriter::new(Vec::new(), lzma_rust2::XzOptions::with_preset(0)).unwrap();
+    let mut builder = tar::Builder::new(xz);
     for name in [
         "manifest.json",
-        "entries.sqlite",
+        "entries.bin",
+        "entries.idx",
         "words.fst",
         "lexicon.bin",
         "THIRD_PARTY.md",
@@ -165,7 +166,7 @@ fn installs_verified_pack_and_reuses_same_archive_without_downloading() {
         .routes
         .lock()
         .unwrap()
-        .remove("/assets/v1.0.0/english-pack.tar.gz");
+        .remove("/assets/v1.0.0/english-pack.tar.xz");
     assert!(run(root.path(), &server.source).unwrap().already_current);
 }
 
@@ -209,7 +210,7 @@ fn failures_never_replace_existing_pointer() {
     let broken = Server::new(bytes);
     broken.put(
         "/assets/v1.0.0/SHA256SUMS.txt",
-        format!("{}  english-pack.tar.gz\n", "0".repeat(64)).into_bytes(),
+        format!("{}  english-pack.tar.xz\n", "0".repeat(64)).into_bytes(),
     );
     assert!(run(root.path(), &broken.source).is_err());
     assert_eq!(fs::read(root.path().join("current.json")).unwrap(), before);
@@ -260,7 +261,7 @@ fn handles_cancellation_timeout_lock_contention_and_commit_failure() {
         .routes
         .lock()
         .unwrap()
-        .get_mut("/assets/v1.0.0/english-pack.tar.gz")
+        .get_mut("/assets/v1.0.0/english-pack.tar.xz")
         .unwrap()
         .2 = Duration::from_millis(350);
     assert!(run(root.path(), &server.source).is_err());
@@ -268,7 +269,7 @@ fn handles_cancellation_timeout_lock_contention_and_commit_failure() {
         .routes
         .lock()
         .unwrap()
-        .get_mut("/assets/v1.0.0/english-pack.tar.gz")
+        .get_mut("/assets/v1.0.0/english-pack.tar.xz")
         .unwrap()
         .2 = Duration::ZERO;
     fs::create_dir(root.path().join("current.json")).unwrap();
@@ -343,7 +344,7 @@ fn rejects_tar_extension_records_even_when_the_resolved_path_is_whitelisted() {
     let fixture = pack();
     let normal = archive(&fixture.path().join("pack"), None);
     let mut original = Vec::new();
-    flate2::read::GzDecoder::new(normal.as_slice())
+    lzma_rust2::XzReader::new(normal.as_slice(), false)
         .read_to_end(&mut original)
         .unwrap();
     let name = b"english-pack/manifest.json\0";
@@ -359,12 +360,36 @@ fn rejects_tar_extension_records_even_when_the_resolved_path_is_whitelisted() {
     let mut bytes = builder.into_inner().unwrap();
     bytes.truncate(1024); // one header and one padded payload, before end markers
     bytes.extend(original);
-    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    let mut gzip =
+        lzma_rust2::XzWriter::new(Vec::new(), lzma_rust2::XzOptions::with_preset(0)).unwrap();
     gzip.write_all(&bytes).unwrap();
     let server = Server::new(gzip.finish().unwrap());
     let root = tempfile::tempdir().unwrap();
     assert!(run(root.path(), &server.source).is_err());
     assert!(!root.path().join("current.json").exists());
+}
+
+#[test]
+fn xz_footer_truncation_and_tails_do_not_replace_a_good_installation() {
+    let fixture = pack();
+    let normal = archive(&fixture.path().join("pack"), None);
+    let mut footer = normal.clone();
+    let n = footer.len();
+    footer[n - 6] ^= 1;
+    let mut tail = normal.clone();
+    tail.extend_from_slice(b"tail");
+    let mut concatenated = normal.clone();
+    concatenated.extend_from_slice(&normal);
+    for bytes in [normal[..n - 1].to_vec(), footer, tail, concatenated] {
+        let root = tempfile::tempdir().unwrap();
+        let valid = Server::new(normal.clone());
+        run(root.path(), &valid.source).unwrap();
+        let receipt = fs::read(root.path().join("current.json")).unwrap();
+        let invalid = Server::new(bytes);
+        assert!(run(root.path(), &invalid.source).is_err());
+        assert_eq!(fs::read(root.path().join("current.json")).unwrap(), receipt);
+        assert!(locate(root.path()).unwrap().is_some());
+    }
 }
 
 #[test]

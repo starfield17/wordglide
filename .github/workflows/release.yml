@@ -36,10 +36,10 @@ jobs:
           if os.environ['REF_TYPE'] == 'tag' and os.environ['REF_NAME'] != 'v' + version:
               raise SystemExit('Release tag must match Cargo.toml version')
           data = json.loads(Path('data-release.json').read_text())
-          if (data['schema_version'] != 3 or data['asset'] != 'english-pack.tar.gz'
+          if (data['schema_version'] != 4 or data['asset'] != 'english-pack.tar.xz'
                   or not re.fullmatch(r'[A-Za-z0-9._-]+', data['tag'])
                   or not re.fullmatch(r'[0-9a-f]{64}', data['sha256'])):
-              raise SystemExit('Invalid pinned dictionary configuration')
+              raise SystemExit('Release requires a published schema-4 english-pack.tar.xz. Publish and verify the new data asset, then update data-release.json with its real tag and checksum.')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('version=' + version + '\ndata_tag=' + data['tag'] + '\ndata_asset=' + data['asset'] + '\n')
           PY
@@ -204,7 +204,7 @@ jobs:
         run: |
           mkdir -p artifacts/unpacked
           tar -xzf "dist/release/wordglide-v$VERSION-x86_64-unknown-linux-musl.tar.gz" -C artifacts/unpacked
-          tar -xzf dist/release/english-pack.tar.gz -C artifacts/unpacked/wordglide
+          tar -xJf dist/release/english-pack.tar.xz -C artifacts/unpacked/wordglide
           artifacts/unpacked/wordglide/wordglide --verify-data
           dict_repo_root="$PWD"
           cd "$(mktemp -d)"
@@ -218,7 +218,7 @@ jobs:
           sys.path.insert(0, 'scripts')
           from package import checksum
           output = Path('dist/release')
-          assets = sorted(output.glob('*.tar.gz'))
+          assets = sorted(output.glob('*.tar.*'))
           assert len(assets) == 5, 'Expected four programs and one dictionary'
           (output / 'SHA256SUMS.txt').write_text(''.join(checksum(p) + '  ' + p.name + '\n' for p in assets))
           PY

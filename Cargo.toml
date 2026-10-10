@@ -1,6 +1,6 @@
 [package]
 name = "wordglide"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -27,7 +27,6 @@ directories = "6"
 fst = "0.4"
 levenshtein_automata = { version = "0.2", features = ["fst_automaton"] }
 ratatui = "0.30"
-rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 sha2 = "0.10"
@@ -36,11 +35,16 @@ unicode-segmentation = "1"
 unicode-width = "0.2"
 # The idle timeout adapter uses ureq's unversioned transport interface.
 ureq = { version = "=3.4.2", default-features = false, features = ["rustls", "rustls-webpki-roots"] }
-flate2 = "1"
+zstd = { version = "0.13", default-features = false, features = ["zdict_builder"] }
+rmp-serde = "1.3"
+lzma-rust2 = { version = "0.21", default-features = false, features = ["std", "xz"] }
 tar = "0.4"
 fs2 = "0.4"
 signal-hook = "0.3"
 tempfile = "3"
+
+[dev-dependencies]
+lzma-rust2 = { version = "0.21", default-features = false, features = ["std", "xz", "encoder"] }
 
 [[bin]]
 name = "wordglide"

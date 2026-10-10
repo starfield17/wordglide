@@ -69,7 +69,7 @@ Normal startup and lookups never use the network.
 Explicit --download-data conflicts with query, --data, --info, and --verify-data.
 It fetches metadata once from the fixed public GitHub latest release endpoint,
 then retrieves the archive and SHA256SUMS from that pinned release. Streamed
-SHA-256, five whitelisted regular archive members, file lengths/checksums,
+SHA-256, six whitelisted regular archive members, file lengths/checksums,
 schema/ranking, and Dictionary::open must pass before atomic activation.
 Installation uses a user-data advisory lock, immutable version directories,
 and an atomic downloads/current.json pointer. Failure/cancellation cleans its
@@ -86,10 +86,9 @@ reading preferences. Updates to an active dictionary leave its worker, query,
 history, and reading position untouched. Restart selects the new pack unless
 --data or WORDGLIDE_DATA overrides it. Failed/cancelled downloads leave Settings
 available for retry.
-Validation: schema 3 only; schema 2 is rejected with dictionary-update and
+Validation: schema 4 only; schema 2/3 are rejected with dictionary-update and
 --data/WORDGLIDE_DATA override guidance. Normal open checks structure and file lengths, plus
-the loaded FST buffer CRC. No default SHA scan, vocabulary traversal, or SQLite
-integrity scan. `wordglide --verify-data [--data DIRECTORY]` performs full
+the loaded FST buffer CRC. No default SHA scan, vocabulary traversal, or definition-block decompression. `wordglide --verify-data [--data DIRECTORY]` performs full
 verification including every compressed entry and entry/index score, headword,
 and POS agreement, reports the entry count and elapsed time, and exits without TUI.
 `wordglide --info` prints pack path, schema, entry count, source snapshot,
@@ -186,14 +185,43 @@ belongs to the terminal session, never the dictionary worker or data pack.
 ## Frame
 Compile source data to a local pack. Runtime indexes contain compact binary candidate metadata and prebuilt ranking;
 definition text and necessary word-form targets are read on demand and cached within a byte budget.
-Schema 3 stores independent zlib-level-6 JSON BLOBs and raw_len in SQLite, never
-an unpacked definition file. Only build/prepare write data. Startup does not
-decompress entries. The private entry codec bounds raw entries to 1 MiB and
-compressed input to 2 MiB, checks stream completion/checksum, rejects tails,
-and checks raw length, JSON, and key. Parsed entries retain the 32 MiB cache
-budget charged against uncompressed size. Schema-3 installed pack size must
-be <=70% of schema 2 for the same source snapshot, alongside existing latency
-and memory targets.
+Schema 4 stores fixed-order private MessagePack entries in independent,
+checksummed Zstd-level-19 blocks of at most 1 MiB, with an up-to-64-KiB shared
+compression dictionary trained deterministically at build time. Small packs
+with fewer than 256 samples or 256 KiB of training input omit that dictionary.
+Only build/prepare write data. Startup does not decompress entries. The private
+codec bounds canonical JSON and binary entries to 1 MiB, compressed blocks to
+2 MiB, Zstd window to 1 MiB, and MessagePack nesting to 16. It checks frame size,
+completion/checksum, rejects tails, validates collection lengths before allocation,
+and checks decoded keys. Parsed entries retain a 32 MiB cache budget charged
+against owned collection/string capacities; uncompressed blocks have a separate
+8 MiB cache. Full verification decompresses each block once and checks every entry.
+The same-source installed pack target is <=190 MiB and download target <=140 MiB;
+startup increment <=5 ms, uncached lookup+preview P95 increment <=5 ms,
+input-to-draw P95 <=50 ms and resident-memory target <=512 MiB. Benchmark comparisons
+use fixed queries and state OS-cache conditions rather than claiming cold disk.
+The download envelope is a single XZ preset-9 tar archive, decoded only during
+installation with a 128 MiB decoder-memory ceiling. Program archives remain gzip.
+
+Pack members: manifest.json, entries.bin, entries.idx, lexicon.bin, words.fst,
+and THIRD_PARTY.md (archive attribution). Manifest sizes/SHA-256 cover the four
+binary files; source provenance, ranking and public JSON shapes are unchanged.
+`entries.idx` uses a 32-byte little-endian header: magic WGLENT04, u32 entry
+count, u32 block count, u32 dictionary length, zero u32 reserved, u64 body length.
+Then dictionary bytes, 24-byte block records (u64 body offset; u32 compressed
+length, raw length, first entry ID, entry count), and eight-byte entry locators
+(u32 block ID, u32 raw offset). Entries are in sorted candidate-ID order; the next
+offset or block length supplies each entry's end. Full verification requires
+contiguous body coverage, unique contiguous entry coverage, and ordered locators.
+The WGLIDX04 index retains its 32-byte header, with POS-combination count at byte
+24 and zero reserved at 28. Each 24-byte candidate stores four u32 key/headword
+range fields, i32 score, and u32 POS ID. Only internal ranking nodes are stored;
+leaf winners are their candidate IDs or EMPTY. The POS table stores eight-byte
+UTF-8 ranges before the shared string pool.
+MessagePack tuple fields are frozen independently of public structs: entry
+(key, headword, score, groups, lemmas, preview_lemmas, source_url); group
+(headword, pos, ipa, senses, etymology_number); sense (glosses, tags, examples,
+targets); example (text, reference, kind). No source field is omitted or rewritten.
 F1 Only build and prepare write pack data; startup never decompresses entries or
 rebuilds the ranking tree ← S2 — check: scripts/test_boundaries.py;
 check: cargo test --doc.
@@ -201,12 +229,13 @@ F2 Indexed top-k equals exhaustive fixed-score ranking, and prefix search never
 enumerates and sorts all matches ← S3
 — check: cargo test index::tests::prefix_matches_exhaustive_oracle_with_ties;
 review: src/index.rs prefix walks the prebuilt range-max tree.
-F3 The private entry codec bounds raw input to 1 MiB and compressed input to
-2 MiB and rejects truncated, tailed, or checksum-failing streams ← S2
-— check: cargo test entry_codec::tests.
+F3 The private entry codec bounds raw entries/blocks to 1 MiB, compressed blocks to
+2 MiB, and rejects truncated, tailed, checksum-failing, or malformed MessagePack streams ← S2
+— check: cargo test entry_codec::tests; cargo test --test schema4.
 F4 The installer copies verified prebuilt bytes and never calls the data
 generator ← S2 — check: scripts/test_boundaries.py.
-Oracle: compare indexed top-k with exhaustive fixed-score ranking in tests.
+Oracle: compare indexed top-k with exhaustive fixed-score ranking in tests;
+compare every source field after pack roundtrip with the canonical input.
 Boundary check: compiler privacy/doc test; the installer copies verified prebuilt
 bytes and never calls the data generator.
 

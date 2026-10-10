@@ -4,7 +4,7 @@
 //! generator; scripts/test_boundaries.py fails if it references a pack encoder.
 use crate::{
     Dictionary,
-    model::{Manifest, RANKING, SCHEMA_VERSION},
+    model::{DATA_FILES, Manifest, RANKING, SCHEMA_VERSION},
 };
 use anyhow::{Context, Result, ensure};
 use directories::ProjectDirs;
@@ -29,7 +29,7 @@ use ureq::unversioned::{
     transport::{Buffers, ConnectionDetails, Connector, DefaultConnector, NextTimeout, Transport},
 };
 
-// Bound each stalled read rather than the duration of the whole 190 MiB download.
+// Bound each stalled read rather than the duration of the whole download.
 #[derive(Debug)]
 struct IdleConnector(Duration);
 #[derive(Debug)]
@@ -82,9 +82,10 @@ impl Transport for IdleTransport {
 const MAX_METADATA: u64 = 1024 * 1024;
 const MAX_ARCHIVE: u64 = 4 * 1024 * 1024 * 1024;
 const MAX_EXPANDED: u64 = 16 * 1024 * 1024 * 1024;
-const FILES: [&str; 5] = [
+const FILES: [&str; 6] = [
     "manifest.json",
-    "entries.sqlite",
+    "entries.bin",
+    "entries.idx",
     "words.fst",
     "lexicon.bin",
     "THIRD_PARTY.md",
@@ -319,7 +320,7 @@ fn checksum(bytes: &[u8]) -> Result<String> {
     let mut found = None;
     for line in text.lines() {
         let mut parts = line.split_whitespace();
-        if let (Some(hash), Some("english-pack.tar.gz"), None) =
+        if let (Some(hash), Some("english-pack.tar.xz"), None) =
             (parts.next(), parts.next(), parts.next())
         {
             ensure!(
@@ -363,7 +364,7 @@ fn install(
                 .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b)),
         "Invalid release tag"
     );
-    let asset = release.asset("english-pack.tar.gz", source, MAX_ARCHIVE)?;
+    let asset = release.asset("english-pack.tar.xz", source, MAX_ARCHIVE)?;
     let sums = release.asset("SHA256SUMS.txt", source, MAX_METADATA)?;
     let hash = checksum(&fetch(
         &agent,
@@ -388,7 +389,7 @@ fn install(
     let stage = tempfile::Builder::new()
         .prefix("pack-")
         .tempdir_in(&packs)?;
-    let archive_path = stage.path().join("archive.tar.gz");
+    let archive_path = stage.path().join("archive.tar.xz");
     progress(Progress::Info(format!(
         "Downloading {} · {:.1} MiB → {}",
         release.tag_name,
@@ -420,8 +421,8 @@ fn install(
     ));
     let pack = stage.path().join("english-pack");
     fs::create_dir(&pack)?;
-    let gzip = flate2::read::GzDecoder::new(fs::File::open(&archive_path)?);
-    let mut tar = tar::Archive::new(gzip.take(MAX_EXPANDED + 1));
+    let xz = lzma_rust2::XzReader::new_mem_limit(fs::File::open(&archive_path)?, false, 128 * 1024);
+    let mut tar = tar::Archive::new(xz.take(MAX_EXPANDED + 1));
     let mut seen = HashSet::new();
     let mut hashes = std::collections::HashMap::new();
     let mut sizes = std::collections::HashMap::new();
@@ -457,7 +458,7 @@ fn install(
         hashes.insert(name.clone(), digest);
         sizes.insert(name, size);
     }
-    // Consume the gzip footer as well, checking CRC/truncation before installation.
+    // Consume the XZ footer as well, checking CRC/truncation before installation.
     let mut remainder = tar.into_inner();
     let mut remaining = 0;
     let mut buffer = [0; 64 * 1024];
@@ -468,10 +469,19 @@ fn install(
             break;
         }
         remaining += count as u64;
+        ensure!(
+            expanded + remaining <= MAX_EXPANDED,
+            "Extracted data exceeds size limit"
+        );
     }
     ensure!(
         expanded + remaining <= MAX_EXPANDED,
         "Extracted data exceeds size limit"
+    );
+    let mut compressed = remainder.into_inner().into_inner();
+    ensure!(
+        compressed.read(&mut [0; 1])? == 0,
+        "Trailing dictionary archive data"
     );
     ensure!(seen.len() == FILES.len(), "Incomplete dictionary archive");
     let manifest: Manifest = serde_json::from_slice(&fs::read(pack.join("manifest.json"))?)?;
@@ -479,7 +489,7 @@ fn install(
         manifest.schema_version == SCHEMA_VERSION && manifest.ranking == RANKING,
         "Incompatible dictionary format; update Wordglide"
     );
-    for name in ["entries.sqlite", "words.fst", "lexicon.bin"] {
+    for name in DATA_FILES {
         ensure!(
             manifest.files.get(name) == hashes.get(name)
                 && manifest.sizes.get(name) == sizes.get(name),

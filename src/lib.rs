@@ -19,6 +19,7 @@ mod build;
 mod config;
 mod download;
 mod entry_codec;
+mod entry_storage;
 mod index;
 mod model;
 mod normalize;

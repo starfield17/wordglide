@@ -1,4 +1,5 @@
 import json
+import lzma
 import hashlib
 import io
 from pathlib import Path
@@ -12,6 +13,20 @@ from prepare import POLICY, OLD_POLICY
 
 
 class PackagingTests(unittest.TestCase):
+    def test_xz_stream_rejects_damaged_footer_truncation_and_tails(self):
+        from package import XzStream
+        valid = lzma.compress(b"fixture" * 100, preset=0)
+        bad_footer = bytearray(valid)
+        bad_footer[-6] ^= 1
+        for archive in (valid[:-1], bytes(bad_footer), valid + b"tail", valid + valid):
+            with self.assertRaises(ValueError):
+                stream = XzStream(io.BytesIO(archive))
+                while stream.read(17):
+                    pass
+        stream = XzStream(io.BytesIO(valid))
+        self.assertEqual(stream.read(1000), b"fixture" * 100)
+        self.assertEqual(stream.read(1000), b"")
+
     def test_program_only_needs_no_dictionary_and_rejects_conflicting_inputs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -116,20 +131,20 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("2026-09-02", notes)
         self.assertNotIn("1,355,084", notes)
 
-    def test_schema_three_archives_reject_old_or_missing_ranking(self):
+    def test_schema_four_archives_reject_old_or_missing_ranking(self):
         from package import validate_data_archive
         with tempfile.TemporaryDirectory() as directory:
-            archive = Path(directory) / "data.tar.gz"
+            archive = Path(directory) / "data.tar.xz"
             for ranking in (OLD_POLICY, None):
-                files = {name: b"format fixture" for name in ("entries.sqlite", "words.fst", "lexicon.bin")}
-                manifest = {"schema_version":3, "candidate_count":1,
+                files = {name: b"format fixture" for name in ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")}
+                manifest = {"schema_version":4, "candidate_count":1,
                             "files":{name:hashlib.sha256(data).hexdigest() for name,data in files.items()},
                             "sizes":{name:len(data) for name,data in files.items()}}
                 if ranking is not None:
                     manifest["ranking"] = ranking
                 files["manifest.json"] = json.dumps(manifest).encode()
                 files["THIRD_PARTY.md"] = b"attribution fixture"
-                with tarfile.open(archive, "w:gz") as tar:
+                with tarfile.open(archive, "w:xz") as tar:
                     for name,data in files.items():
                         member = tarfile.TarInfo("english-pack/" + name)
                         member.size = len(data)
@@ -143,13 +158,13 @@ class PackagingTests(unittest.TestCase):
             root = Path(directory)
             pack = root / "pack"
             pack.mkdir()
-            for name in ("entries.sqlite", "words.fst", "lexicon.bin"):
+            for name in ("entries.bin", "entries.idx", "words.fst", "lexicon.bin"):
                 (pack / name).write_bytes(b"format fixture")
-            manifest = {"schema_version": 3, "ranking": POLICY, "candidate_count": 1,
+            manifest = {"schema_version": 4, "ranking": POLICY, "candidate_count": 1,
                         "sizes": {name: (pack / name).stat().st_size for name in
-                                  ("entries.sqlite", "words.fst", "lexicon.bin")},
+                                  ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")},
                         "files": {name: checksum(pack / name) for name in
-                                  ("entries.sqlite", "words.fst", "lexicon.bin")}}
+                                  ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")}}
             (pack / "manifest.json").write_text(json.dumps(manifest))
             binaries = root / "binaries"
             binaries.mkdir()
@@ -160,7 +175,7 @@ class PackagingTests(unittest.TestCase):
                             "--pack", str(pack), "--binaries", str(binaries),
                             "--target", "x86_64-unknown-linux-musl", "--version", "0.1.0",
                             "--output", str(output)], check=True, capture_output=True)
-            archives = list(output.glob("*.tar.gz"))
+            archives = list(output.glob("*.tar.*"))
             self.assertEqual(len(archives), 2)
             for archive in archives:
                 with tarfile.open(archive) as tar:
@@ -169,7 +184,7 @@ class PackagingTests(unittest.TestCase):
                         self.assertEqual((member.uid, member.gid, member.uname, member.gname,
                                           member.mtime, member.pax_headers), (0, 0, "", "", 0, {}))
                     names = {m.name for m in members}
-                    if archive.name == "english-pack.tar.gz":
+                    if archive.name == "english-pack.tar.xz":
                         self.assertIn("english-pack/manifest.json", names)
                         self.assertNotIn("wordglide/wordglide", names)
                     else:
@@ -187,13 +202,13 @@ class PackagingTests(unittest.TestCase):
             payload = root / "payload"
             payload.write_text("fixture")
             for name in ("../outside", "english-pack/extra"):
-                archive = root / "unsafe.tar.gz"
-                with tarfile.open(archive, "w:gz") as tar:
+                archive = root / "unsafe.tar.xz"
+                with tarfile.open(archive, "w:xz") as tar:
                     tar.add(payload, arcname=name, filter=portable_metadata)
                 with self.assertRaises(ValueError):
                     validate_data_archive(archive)
-            with tarfile.open(archive, "w:gz") as tar:
-                member = tarfile.TarInfo("english-pack/entries.sqlite")
+            with tarfile.open(archive, "w:xz") as tar:
+                member = tarfile.TarInfo("english-pack/entries.bin")
                 member.type = tarfile.SYMTYPE
                 member.linkname = "outside"
                 tar.addfile(member)
@@ -203,15 +218,15 @@ class PackagingTests(unittest.TestCase):
     def test_data_archive_rejects_special_permissions_even_with_valid_hashes(self):
         from package import validate_data_archive
         payload = b"format fixture"
-        files = {name: payload for name in ("entries.sqlite", "words.fst", "lexicon.bin")}
-        files["manifest.json"] = json.dumps({"schema_version": 3, "ranking": POLICY, "candidate_count": 1,
+        files = {name: payload for name in ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")}
+        files["manifest.json"] = json.dumps({"schema_version": 4, "ranking": POLICY, "candidate_count": 1,
             "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
             "sizes": {name: len(data) for name, data in files.items()}}).encode()
         files["THIRD_PARTY.md"] = b"attribution fixture"
         with tempfile.TemporaryDirectory() as directory:
-            archive = Path(directory) / "data.tar.gz"
+            archive = Path(directory) / "data.tar.xz"
             for mode in (0o644, 0o4777):
-                with tarfile.open(archive, "w:gz") as tar:
+                with tarfile.open(archive, "w:xz") as tar:
                     for name, data in files.items():
                         member = tarfile.TarInfo("english-pack/" + name)
                         member.mode, member.size = mode, len(data)

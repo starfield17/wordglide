@@ -1,11 +1,11 @@
 use crate::{
-    Candidate, Entry, MatchKind, Preview, entry_codec,
+    Candidate, Entry, MatchKind, Preview,
+    entry_storage::Entries,
     index::Index,
-    model::{Manifest, RANKING, SCHEMA_VERSION},
+    model::{DATA_FILES, Manifest, RANKING, SCHEMA_VERSION},
     normalize,
 };
 use anyhow::{Context, Result, ensure};
-use rusqlite::{Connection, OpenFlags};
 use std::{
     collections::{HashMap, VecDeque},
     fs,
@@ -28,7 +28,7 @@ fn pack_open_hint(path: &Path) -> String {
 
 pub struct Dictionary {
     index: Arc<Index>,
-    conn: Connection,
+    entries: Entries,
     cache: HashMap<String, (Arc<Entry>, usize)>,
     order: VecDeque<String>,
     cache_bytes: usize,
@@ -67,7 +67,7 @@ impl Dictionary {
             manifest.ranking == RANKING,
             "Incompatible ranking policy; rebuild or install a compatible data pack"
         );
-        for name in ["entries.sqlite", "words.fst", "lexicon.bin"] {
+        for name in DATA_FILES {
             let size = manifest
                 .sizes
                 .get(name)
@@ -93,33 +93,10 @@ impl Dictionary {
             index.len() == manifest.candidate_count,
             "Data pack candidate count mismatch"
         );
-        let conn = Connection::open_with_flags(
-            path.join("entries.sqlite"),
-            OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )?;
-        conn.execute_batch("PRAGMA cache_size=-8192; PRAGMA query_only=ON;")?;
-        let version: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        ensure!(version == SCHEMA_VERSION, "Incompatible SQLite schema");
-        let columns: Vec<(String, String, bool)> = conn
-            .prepare("PRAGMA table_info(entries)")?
-            .query_map([], |r| Ok((r.get(1)?, r.get(2)?, r.get::<_, u32>(5)? == 1)))?
-            .collect::<rusqlite::Result<_>>()?;
-        ensure!(
-            columns
-                .iter()
-                .any(|(n, t, p)| n == "key" && t.eq_ignore_ascii_case("TEXT") && *p)
-                && columns
-                    .iter()
-                    .any(|(n, t, _)| n == "payload" && t.eq_ignore_ascii_case("BLOB"))
-                && columns
-                    .iter()
-                    .any(|(n, t, _)| n == "raw_len" && t.eq_ignore_ascii_case("INTEGER")),
-            "Incompatible entries table"
-        );
-        conn.prepare("SELECT raw_len,payload FROM entries WHERE key=?1")?;
+        let entries = Entries::open(path, index.len())?;
         Ok(Self {
             index,
-            conn,
+            entries,
             cache: HashMap::new(),
             order: VecDeque::new(),
             cache_bytes: 0,
@@ -195,10 +172,12 @@ impl Dictionary {
             self.order.push_back(key.to_string());
             return Ok(entry);
         }
-        let (raw_len, payload) = read_payload(&self.conn, key)?;
-        let entry: Arc<Entry> = Arc::new(entry_codec::decode(key, raw_len, &payload)?);
-        // Approximate heap footprint conservatively; cache is bounded by payload+overhead.
-        let bytes = raw_len as usize * 4 + 512;
+        let id = self.index.exact(key).context("Missing dictionary entry")?;
+        let decoded = self.entries.read(id, key)?;
+        let entry = Arc::new(decoded);
+        // Count collection capacities even for empty strings; wire size is no
+        // longer a safe proxy. Include the cache's two key copies and bookkeeping.
+        let bytes = entry.cache_bytes() + key.len() * 2 + 512;
         if bytes <= CACHE_BYTES {
             while self.cache_bytes + bytes > CACHE_BYTES {
                 if let Some(old) = self.order.pop_front()
@@ -227,15 +206,6 @@ impl Dictionary {
         }
         Ok(Preview { entry, related })
     }
-}
-
-// Inspect lengths before materializing a BLOB, including externally supplied packs.
-fn read_payload(conn: &Connection, key: &str) -> Result<(i64, Vec<u8>)> {
-    conn.query_row(
-        "SELECT raw_len, CASE WHEN typeof(raw_len)='integer' AND raw_len BETWEEN 1 AND ?2 AND typeof(payload)='blob' AND length(payload) BETWEEN 1 AND ?3 THEN payload ELSE NULL END FROM entries WHERE key=?1",
-        rusqlite::params![key, entry_codec::MAX_RAW as i64, entry_codec::MAX_COMPRESSED as i64],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    ).with_context(|| format!("Missing or corrupt dictionary entry: {key}"))
 }
 
 /// Human-readable metadata about a prepared data pack.
@@ -296,37 +266,18 @@ pub fn pack_info(path: &Path) -> Result<PackInfo> {
 /// Returns the number of verified entries.
 pub fn verify_pack(path: &Path) -> Result<usize> {
     let manifest: Manifest = serde_json::from_slice(&fs::read(path.join("manifest.json"))?)?;
-    let dict = Dictionary::open(path)?;
-    for name in ["entries.sqlite", "words.fst", "lexicon.bin"] {
+    let mut dict = Dictionary::open(path)?;
+    for name in DATA_FILES {
         ensure!(
             manifest.files.get(name) == Some(&crate::build::checksum(&path.join(name))?),
             "Corrupt data pack checksum: {name}"
         );
     }
     dict.index.verify()?;
-    let messages = dict
-        .conn
-        .prepare("PRAGMA integrity_check")?
-        .query_map([], |r| r.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    ensure!(
-        messages == ["ok"],
-        "Corrupt SQLite database: {}",
-        messages.join("; ")
-    );
-    let mut stmt = dict
-        .conn
-        .prepare("SELECT key FROM entries ORDER BY key COLLATE BINARY")?;
-    let mut rows = stmt.query([])?;
+    dict.entries.verify_layout()?;
     for i in 0..dict.index.len() {
-        let row = rows.next()?.context("Missing database entry")?;
-        ensure!(
-            row.get::<_, String>(0)? == dict.index.key(i)?,
-            "Database and index vocabulary differ"
-        );
         let key = dict.index.key(i)?;
-        let (raw_len, payload) = read_payload(&dict.conn, key)?;
-        let entry = entry_codec::decode(key, raw_len, &payload)?;
+        let entry = dict.entries.read(i, key)?;
         let candidate = dict.index.candidate(i, MatchKind::Exact)?;
         ensure!(
             entry.score == candidate.score
@@ -335,6 +286,5 @@ pub fn verify_pack(path: &Path) -> Result<usize> {
             "Corrupt entry/index metadata: {key}"
         );
     }
-    ensure!(rows.next()?.is_none(), "Unexpected database entries");
     Ok(dict.index.len())
 }

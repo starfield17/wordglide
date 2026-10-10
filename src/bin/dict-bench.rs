@@ -15,6 +15,9 @@ struct Args {
     data: PathBuf,
     #[arg(long, default_value_t = 100)]
     iterations: usize,
+    /// Newline-separated fixed queries; each is measured with fresh application caches.
+    #[arg(long)]
+    queries: Option<PathBuf>,
 }
 
 fn percentile(values: &mut [f64], p: usize) -> f64 {
@@ -64,6 +67,38 @@ fn main() -> Result<()> {
         );
     }
     println!("First-cache-read uses a fresh application cache; OS file caches are not flushed.");
+    if let Some(path) = &args.queries {
+        let text = std::fs::read_to_string(path)?;
+        let queries: Vec<_> = text.lines().filter(|q| !q.trim().is_empty()).collect();
+        ensure!(!queries.is_empty(), "query file is empty");
+        let mut opens = Vec::new();
+        let mut cold = Vec::new();
+        let mut warm = Vec::new();
+        for query in &queries {
+            let start = Instant::now();
+            let mut dictionary = Dictionary::open(&args.data)?;
+            opens.push(start.elapsed().as_secs_f64() * 1000.);
+            for values in [&mut cold, &mut warm] {
+                let start = Instant::now();
+                let matches = dictionary.search(query)?;
+                ensure!(
+                    !matches.is_empty(),
+                    "No results for benchmark query: {query}"
+                );
+                dictionary.preview(&matches[0])?;
+                values.push(start.elapsed().as_secs_f64() * 1000.);
+            }
+        }
+        println!(
+            "Fixed queries={} open P50={:.3}ms P95={:.3}ms uncached lookup+preview P50={:.3}ms P95={:.3}ms cached P95={:.3}ms (OS caches not flushed)",
+            queries.len(),
+            percentile(&mut opens, 50),
+            percentile(&mut opens, 95),
+            percentile(&mut cold, 50),
+            percentile(&mut cold, 95),
+            percentile(&mut warm, 95),
+        );
+    }
     let mut app = App::new(Dictionary::open(&args.data)?, "");
     let mut terminal = Terminal::new(TestBackend::new(120, 40))?;
     let mut values = vec![];

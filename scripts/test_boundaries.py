@@ -18,7 +18,7 @@ DOWNLOAD_MODULE = {"download.rs", "download/tests.rs"}
 
 # Pack encoders live in their owner modules; only the builder may call them at
 # runtime, so no lookup or startup path can rewrite or rebuild pack data.
-PACK_ENCODERS = ("Index::encode", "entry_codec::encode")
+PACK_ENCODERS = ("Index::encode", "entry_codec::encode", "entry_codec::compress", "zstd::dict::from_samples")
 ENCODER_OWNERS = {"build.rs", "index.rs", "entry_codec.rs"}
 
 

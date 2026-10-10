@@ -1,120 +1,116 @@
-# Full-data verification
+# Full-data storage and latency verification
 
-Reference measurements use the full English data pack.
-They establish one measured run; repeat the commands in deployment environments.
+The schema-4 reference pack uses the same 2026-09-02 English Wiktionary snapshot
+and ranking as schema 3. Measurements describe these runs; repeat the commands
+on deployment targets. OS file caches were not flushed.
 
-## Data
+## Data and lossless verification
 
-- Source: English Wiktionary via [raw Kaikki/Wiktextract](https://kaikki.org/dictionary/rawdata.html).
-- Pack format: schema 3, prebuilt candidates/POS/ranking and independent zlib entries.
-- Source dump: 2026-09-02; preparation date: 2026-10-06; re-ranking/build: 2026-10-08.
-- Compressed input SHA-256: `3dac8a09e57827bef493e2e6b552fe917bf3b1fc55dee05c4e4a3702aff5dbdb`.
-- 1,355,084 normalized entries; 1,491,592 part-of-speech groups; 1,785,990 senses.
+- 1,355,084 normalized entries; 1,491,592 POS groups; 1,785,990 senses.
 - 382,357 senses have source examples; 297,854 have group pronunciation data.
-- One malformed source record was quarantined with its original text and reason.
+- Compressed source SHA-256: `3dac8a09e57827bef493e2e6b552fe917bf3b1fc55dee05c4e4a3702aff5dbdb`.
+- The existing canonical preparation and wordfreq scores were retained.
+- An independent MessagePack/Zstd reader compared every field of all 1,355,084
+  entries against canonical JSONL: no content, order, score, or source-field
+  differences. This comparison took 18.245 s.
+- `wordglide --verify-data` checked all file SHA-256 receipts, index/FST agreement,
+  ranking, block/locator coverage, and every decoded entry: **1.8 s**. Each block
+  was decompressed once; normal startup does none of this full scan.
 
-The manifest carries checksums, source provenance, quality counts, and licenses.
-Definitions and examples retain source wording. Source labels and coverage are
-uneven; these counts do not establish learner-dictionary editorial quality.
+## Installed and download size
 
-Every one of the 1,355,084 canonical entries was compared against the schema-2
-preparation. All fields except score are identical; 70,730 scores changed by
-exactly 150 per U+002D/U+2010 hyphen. The prior wordfreq baseline and source
-snapshot were retained. Source receipts record the prior canonical SHA-256.
-
-## Installed size and archive trade-off
-
-| Same source snapshot | Schema 2 bytes | Schema 3 bytes |
+| Same source snapshot | Schema 3 | Schema 4 |
 | --- | ---: | ---: |
-| Installed pack (manifest, database, index, FST) | 1,224,210,425 | 637,533,325 |
+| Pack binaries and manifest, bytes | 637,533,325 | 192,989,452 |
+| Pack binaries and manifest, MiB | 608.00 | 184.05 |
+| Shared data archive, bytes | 449,923,088 | 133,568,716 |
+| Shared data archive, MiB | 429.08 | 127.38 |
 
-Schema 3 is **52.1%** of the old installed size, passing the <=70% target.
-The portable data archive is **449,923,088 bytes** (about 429 MiB), versus the
-previous roughly 190 MiB archive. Independent zlib streams reduce installed
-storage but sacrifice cross-entry redundancy in the outer gzip archive, so this
-release's download is larger. No claim is made that per-entry compression also
-reduces download bytes.
+The local pack is **69.7% smaller**; the download is **70.3% smaller**. Archive
+attribution adds only a few KiB to the installed total. Historical installed
+versions remain separate and are not included in the per-pack comparison.
 
-## Method
+| Schema-4 binary component | Bytes |
+| --- | ---: |
+| Independent Zstd blocks, `entries.bin` | 116,174,817 |
+| Dictionary, directory and locators, `entries.idx` | 10,915,888 |
+| Compact candidate/POS/ranking index, `lexicon.bin` | 58,189,134 |
+| Existing exact/fuzzy FST, `words.fst` | 7,704,412 |
+
+Entry tuples use lossless fixed-order MessagePack. The builder sorts entries,
+trains an up-to-64-KiB dictionary on deterministic samples, and writes independent
+checksummed Zstd-level-19 frames with at most 1 MiB of raw data. SQLite page/key
+storage is removed. POS IDs and implicit ranking leaves save about 13 MiB more.
+The download is XZ preset 9; program archives remain gzip. The data archive's
+SHA-256 is `5b2a03f626dbe06673ea010e156efba76828a5a40f6fba3c48ed19fd273d54b8`.
+
+A full-size localhost HTTP test invoked the production installer, including
+streamed archive SHA-256, bounded XZ decoding, per-member hashing, structural open
+and atomic activation. Installation took **3.003 s**, excluding internet latency.
+Full verification and same-archive reuse also passed. This is a test-source
+measurement, not a public-release download claim.
+
+## Lookup latency
+
+Three paired runs used the same benchmark source against old and new libraries,
+with 1,010 fixed queries: 1,000 distinct vocabulary keys sampled with seed 1729,
+plus `h`, `ho`, `house`, `hosue`, `went`, `better`, `take off`, `set`, `take`, `run`.
+Each query opened a fresh Dictionary before timing search plus preview, then
+measured the cached lookup. Opening time is reported separately. Some runs
+coincided with verification work; all runs and their variation are shown.
+
+| Run | Open P95, schema 3 → 4 (ms) | Uncached lookup+preview P95, schema 3 → 4 (ms) | Cached P95, schema 3 → 4 (ms) |
+| --- | --- | --- | --- |
+| 1 | 7.141 → 6.573 | 0.695 → 1.204 | 0.116 → 0.122 |
+| 2 | 6.967 → 10.030 | 0.223 → 2.140 | 0.119 → 0.320 |
+| 3 | 9.421 → 7.690 | 0.412 → 1.241 | 0.229 → 0.156 |
+
+All paired startup and uncached P95 increments stay below 5 ms. Median open
+P50 is about 6 ms in both formats. First access pays one block decode; cached
+queries retain their existing path. The native PTY process peak was about
+**80–82 MiB**, including startup. The 32 MiB entry-cache charge now counts owned
+string/vector capacities; a separate 8 MiB budget bounds raw block caching.
+PTY RSS does not claim to measure fully filled caches.
+
+Asynchronous input-to-120×40-TestBackend-render P95 in schema 4 was **3.392,
+7.470, 4.004 ms**, below the 50 ms target. This includes worker and drawing time,
+not terminal-emulator display latency. Long `set`/`take`/`run` entries, scrolling,
+find and example-expansion/resize remained responsive.
+
+## Reproduction and checks
 
 ```sh
-./target/release/dict-bench --data PACK_DIRECTORY --iterations 100
-python3 scripts/terminal_smoke.py --data PACK_DIRECTORY
-python3 scripts/terminal_smoke.py --data PACK_DIRECTORY \
-  --query went --needle '(word form)'
+cargo build --locked --release --bins
+target/release/dict-build --input CANONICAL_ENTRIES_JSONL \
+  --source PROVENANCE_JSON --output NEW_PACK_DIRECTORY
+target/release/wordglide --data NEW_PACK_DIRECTORY --verify-data
+target/release/dict-bench --data NEW_PACK_DIRECTORY --iterations 100 \
+  --queries FIXED_NEWLINE_QUERY_FILE
+python3 scripts/package.py --pack NEW_PACK_DIRECTORY --target TARGET \
+  --output NEW_OUTPUT_DIRECTORY
+python3 scripts/terminal_smoke.py --data NEW_PACK_DIRECTORY
+python3 scripts/terminal_interaction_smoke.py --data NEW_PACK_DIRECTORY
+make check
 ```
 
-Lookup measurements include candidate ranking and the top entry's definition
-preview. Each category first opens a fresh dictionary cache, then measures 100
-warm iterations. OS file caches are not flushed.
+Maintainers select their Python environment at invocation; the shipped program
+needs neither Python nor an external compression executable.
 
-The asynchronous measurement alternates `ho` and `hosue`, waits for the worker,
-and draws a 120×40 Ratatui TestBackend. It includes rendering work and excludes
-terminal emulator display latency. The PTY checks type without Enter, verify
-source preview text, exit with Ctrl+C, and check terminal restoration. Their
-peak process resident memory includes startup; they do not exercise a completely
-filled definition cache. That cache has a separate 32 MiB budget.
+Formatting, all-target Clippy, Rust tests/doc tests, cargo-deny policy, and Python
+pipeline tests passed. Corruption checks include bad/truncated/concatenated
+frames, malicious MessagePack lengths, invalid locators/directories, dictionary
+mismatches, oversized entries, and damaged XZ footers/tails. Unsorted CRLF input,
+multiple blocks, and repeated deterministic builds are exercised. A forbidden
+runtime compression call was rejected by the boundary check; valid owners passed.
+Independent review confirmed the storage checks and corrected cache accounting.
 
-The CI matrix is configured to check macOS and Linux. Release validation builds
-Intel/ARM64 macOS and x86_64/ARM64 Linux packages, checks runtime dependencies,
-and exercises packaged programs with the sample dictionary on each platform.
-Release assembly verifies the separate full dictionary once with the Linux
-x86_64 program and checks automatic discovery from an unrelated directory. This local schema-3 run validates the native macOS
-target; the other three release targets require CI and were not executed locally.
-Windows is not a target.
+Full-data PTY lookup, word-form preview, reading interaction and terminal
+restoration passed. Theme/preferences and no-data recovery checks also passed.
+True Rust 1.88 all-target compilation and Intel macOS cross-target checking
+passed; runtime testing was performed on native ARM64 macOS. Native Linux and
+all four release builds remain CI checks and were not executed locally.
 
-## Historical startup comparison (schema 2)
-
-Three successive release-program launches open the same full vocabulary and wait
-for the terminal alternate screen to become active, with no initial query. OS
-file caches are not flushed; these are warm-cache measurements, not cold-disk
-claims. The PTY timing includes process launch and pack opening.
-
-| Format | Startup to terminal UI, three runs (ms) | Median (ms) |
-| --- | --- | ---: |
-| Old JSON/runtime-built index | 2976.015, 2435.648, 2433.293 | 2435.648 |
-| Compact prebuilt index | 11.754, 10.405, 9.784 | 10.405 |
-
-The schema-2 benchmark reported dictionary-open time separately: **20.756 ms**.
-The current schema-3 run reports **15.388 ms**, excluding process launch and
-terminal setup. Schema-3 index and FST data occupy about **76 MiB**. Normal open
-performs no dictionary SHA scan or vocabulary traversal; the small FST buffer is
-CRC-checked before use. Complete SHA/index/database verification passed separately.
-
-## Schema-3 results
-
-| Lookup | Query | First cache read (ms) | Warm P50 (ms) | Warm P95 (ms) |
-| --- | --- | ---: | ---: | ---: |
-| Single letter | `h` | 0.874 | 0.009 | 0.018 |
-| Prefix | `ho` | 0.556 | 0.004 | 0.004 |
-| Exact | `house` | 0.454 | 0.003 | 0.003 |
-| Fuzzy | `hosue` | 0.280 | 0.084 | 0.089 |
-| Word form | `went` | 1.180 | 0.003 | 0.003 |
-| Phrase | `take off` | 0.856 | 0.095 | 0.121 |
-
-- Asynchronous input-to-render P95: **3.695 ms**; target: ≤50 ms.
-- Peak resident memory: about **82 MiB**; target: ≤512 MiB.
-- Complete checksum/index/database/entry verification passed: **13.8 s**.
-- Real PTY startup to UI: **55.942 ms** for the recorded `fist` run, including
-  process launch and the smoke script's 50 ms polling interval; no cold-disk claim.
-- Long-entry `set`/`take`/`run` scrolling P95: 0.170–0.320 ms;
-  resize plus example expansion P95: 1.266–5.380 ms.
-- Both real-PTY checks passed: automatic preview without Enter, successful
-  exit, restored terminal attributes, and restored alternate screen.
-- Reading-interaction PTY checks passed on the full pack. Appearance PTY checks
-  passed on the 89-entry sample, including configuration bypass verification.
-  Full-pack verification is checked separately: its 13.8 s duration exceeds the
-  appearance harness's five-second subprocess limit, which remains unchanged.
-- Missing/invalid-data PTY checks passed without a data argument and with explicit
-  overrides: query editing, F2 download access, old-format/corrupt-pack diagnostics,
-  invalid managed-receipt guidance, and terminal restoration. Local HTTP tests
-  verify damaged receipts can be repaired while preserving them on failure/cancellation.
-- Formatting, Clippy with warnings denied, cargo-deny (advisories, bans,
-  licenses, sources), 126 Rust tests, two compile-fail boundary doc tests, and
-  25 Python pipeline tests passed.
-
-Full-pack terminal checks confirm `home` precedes `how-to`, `household` precedes
-`house-like`, exact `house-like` remains selected, and source POS summaries appear.
-They also confirm `went → go`, `better → good / well`, and `take off`.
-`house` and `fist` do not gain unrelated inverse aliases;
-historical-only groups cannot supply modern inverse inflection links.
+The new data archive is a local validated artifact. Public publication is
+separate: publish schema 4 and its checksum first, then update `data-release.json`
+with the real published tag before releasing the program. The existing pin still
+accurately names the published schema-3 asset; schema 2/3 is not converted at runtime.

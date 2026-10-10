@@ -7,9 +7,9 @@ use std::{
     collections::{BinaryHeap, HashMap},
 };
 
-const MAGIC: &[u8; 8] = b"WGLIDX03";
+const MAGIC: &[u8; 8] = b"WGLIDX04";
 const HEADER: usize = 32;
-const RECORD: usize = 28;
+const RECORD: usize = 24;
 const EMPTY: usize = u32::MAX as usize;
 
 // All offsets and integers are decoded safely from a portable little-endian file.
@@ -20,6 +20,8 @@ pub(crate) struct Index {
     leaves: usize,
     tree_start: usize,
     strings_start: usize,
+    parts_start: usize,
+    parts_count: usize,
     fst: fst::Map<Vec<u8>>,
     fuzzy: LevenshteinAutomatonBuilder,
 }
@@ -41,6 +43,7 @@ impl Index {
         let mut strings = Vec::new();
         let mut records = Vec::new();
         let mut parts_pool = HashMap::new();
+        let mut parts_ranges = Vec::new();
         for word in words {
             let key_offset = u32::try_from(strings.len())?;
             let key_len = u32::try_from(word.key.len())?;
@@ -65,19 +68,17 @@ impl Index {
                     && word.parts_of_speech.windows(2).all(|p| p[0] < p[1]),
                 "Invalid candidate parts of speech"
             );
-            // NUL-delimited source labels are interned as a binary string slice;
-            // repeated combinations cost just an offset and length per record.
             let parts = word.parts_of_speech.join("\0");
-            let (offset, len) = if let Some(&range) = parts_pool.get(&parts) {
-                range
+            let id = if let Some(&id) = parts_pool.get(&parts) {
+                id
             } else {
-                let range = (u32::try_from(strings.len())?, u32::try_from(parts.len())?);
+                let id = u32::try_from(parts_ranges.len())?;
+                parts_ranges.push((u32::try_from(strings.len())?, u32::try_from(parts.len())?));
                 strings.extend_from_slice(parts.as_bytes());
-                parts_pool.insert(parts, range);
-                range
+                parts_pool.insert(parts, id);
+                id
             };
-            records.extend_from_slice(&offset.to_le_bytes());
-            records.extend_from_slice(&len.to_le_bytes());
+            records.extend_from_slice(&id.to_le_bytes());
         }
         ensure!(strings.len() <= u32::MAX as usize, "String index too large");
         let best = |a: usize, b: usize| {
@@ -101,10 +102,15 @@ impl Index {
         data.extend_from_slice(&(words.len() as u32).to_le_bytes());
         data.extend_from_slice(&u32::try_from(leaves)?.to_le_bytes());
         data.extend_from_slice(&(strings.len() as u64).to_le_bytes());
-        data.extend_from_slice(&0u64.to_le_bytes());
+        data.extend_from_slice(&u32::try_from(parts_ranges.len())?.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
         data.extend_from_slice(&records);
-        for i in tree {
+        for &i in &tree[..leaves] {
             data.extend_from_slice(&(i as u32).to_le_bytes());
+        }
+        for (offset, len) in parts_ranges {
+            data.extend_from_slice(&offset.to_le_bytes());
+            data.extend_from_slice(&len.to_le_bytes());
         }
         data.extend_from_slice(&strings);
         Ok(data)
@@ -124,15 +130,23 @@ impl Index {
             count > 0 && count < EMPTY && count.checked_next_power_of_two() == Some(leaves),
             "Corrupt index counts"
         );
-        ensure!(data[24..32] == [0; 8], "Unsupported index header");
+        let parts_count = u32_at(24);
+        ensure!(
+            parts_count > 0 && parts_count <= count && data[28..32] == [0; 4],
+            "Unsupported index header"
+        );
         let tree_start = count
             .checked_mul(RECORD)
             .and_then(|n| n.checked_add(HEADER))
             .context("Corrupt index size")?;
-        let strings_start = leaves
-            .checked_mul(8)
+        let parts_start = leaves
+            .checked_mul(4)
             .and_then(|n| n.checked_add(tree_start))
             .context("Corrupt index size")?;
+        let strings_start = parts_count
+            .checked_mul(8)
+            .and_then(|n| n.checked_add(parts_start))
+            .context("Corrupt parts table size")?;
         ensure!(
             strings_start.checked_add(strings_len) == Some(data.len()),
             "Corrupt index section lengths"
@@ -163,6 +177,8 @@ impl Index {
             leaves,
             tree_start,
             strings_start,
+            parts_start,
+            parts_count,
             fst,
             fuzzy: LevenshteinAutomatonBuilder::new(1, true),
         })
@@ -179,6 +195,10 @@ impl Index {
 
     fn text(&self, i: usize, field: usize) -> Result<&str> {
         let record = self.record(i)?;
+        self.string_range(record, field)
+    }
+
+    fn string_range(&self, record: &[u8], field: usize) -> Result<&str> {
         let offset = u32::from_le_bytes(record[field..field + 4].try_into().unwrap()) as usize;
         let len = u32::from_le_bytes(record[field + 4..field + 8].try_into().unwrap()) as usize;
         let end = offset.checked_add(len).context("Corrupt string range")?;
@@ -198,7 +218,11 @@ impl Index {
     }
 
     pub(crate) fn parts_of_speech(&self, i: usize) -> Result<Vec<String>> {
-        let text = self.text(i, 20)?;
+        let record = self.record(i)?;
+        let id = u32::from_le_bytes(record[20..24].try_into()?) as usize;
+        ensure!(id < self.parts_count, "Corrupt parts ID");
+        let start = self.parts_start + 8 * id;
+        let text = self.string_range(&self.data[start..start + 8], 0)?;
         let parts: Vec<_> = text.split('\0').map(str::to_owned).collect();
         ensure!(
             parts
@@ -212,6 +236,10 @@ impl Index {
 
     fn tree(&self, i: usize) -> Result<usize> {
         ensure!(i < 2 * self.leaves, "Corrupt tree offset");
+        if i >= self.leaves {
+            let id = i - self.leaves;
+            return Ok(if id < self.count { id } else { EMPTY });
+        }
         let start = self.tree_start + 4 * i;
         let value = u32::from_le_bytes(self.data[start..start + 4].try_into().unwrap()) as usize;
         ensure!(
@@ -461,8 +489,8 @@ mod tests {
         let fst = builder.into_inner().unwrap();
         let mut bytes = Index::encode(&words).unwrap();
         assert_eq!(
-            &bytes[HEADER + 20..HEADER + 28],
-            &bytes[HEADER + RECORD + 20..HEADER + RECORD + 28]
+            &bytes[HEADER + 20..HEADER + 24],
+            &bytes[HEADER + RECORD + 20..HEADER + RECORD + 24]
         );
         let index = Index::open(bytes.clone(), fst.clone()).unwrap();
         index.verify().unwrap();
