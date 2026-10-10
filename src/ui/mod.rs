@@ -146,4 +146,7 @@ pub(in crate::ui) fn render(frame: &mut Frame, app: &mut App, pointer: &mut Poin
     if app.view.overlay == Overlay::Download {
         appearance::render_download(frame, app, pointer);
     }
+    if app.view.overlay == Overlay::Peek {
+        panels::render_peek(frame, app, pointer);
+    }
 }

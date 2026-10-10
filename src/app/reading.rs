@@ -292,8 +292,12 @@ fn append_entry(
                 continue;
             }
             let section = sections.len();
+            let etym_outline = group
+                .etymology_number
+                .map(|n| format!("[Etym {n}] "))
+                .unwrap_or_default();
             let title = format!(
-                "{} · {} · {} senses{}",
+                "{etym_outline}{} · {} · {} senses{}",
                 group.headword,
                 group.pos,
                 senses.len(),
@@ -319,9 +323,13 @@ fn append_entry(
                 sense,
                 part,
             };
+            let etym_header = group
+                .etymology_number
+                .map(|n| format!("  [Etym {n}]"))
+                .unwrap_or_default();
             let mut header = LogicalLine::new(
                 format!(
-                    "{}  {}  ({} senses)  {}{}",
+                    "{}  {}{etym_header}  ({} senses)  {}{}",
                     group.headword,
                     group.pos,
                     senses.len(),

@@ -25,16 +25,18 @@ pub(crate) enum Action {
     Help,
     Mouse,
     Quit,
+    Peek,
 }
 
 impl Action {
-    pub(crate) const ALL: [Self; 21] = [
+    pub(crate) const ALL: [Self; 22] = [
         Self::Commands,
         Self::Complete,
         Self::NewLookup,
         Self::Focus,
         Self::Accept,
         Self::Prediction,
+        Self::Peek,
         Self::Find,
         Self::Outline,
         Self::Layout,
@@ -63,6 +65,7 @@ impl Action {
             Self::Focus => "Switch input / reading focus",
             Self::Accept => "Accept candidate and read",
             Self::Prediction => "Accept prediction",
+            Self::Peek => "Quick peek candidate card",
             Self::Follow => "Follow a visible word",
             Self::Top => "Top of definition",
             Self::Bottom => "Bottom of definition",
@@ -88,6 +91,7 @@ impl Action {
             Self::Focus => "Ctrl+L",
             Self::Accept => "Enter",
             Self::Prediction => "Ctrl+F",
+            Self::Peek => "Space",
             Self::Follow => "f",
             Self::Top => "Home",
             Self::Bottom => "End",
@@ -115,12 +119,18 @@ impl App {
             panel
         };
         self.panel_query.clear();
-        self.view.panel_row = 0;
+        self.view.panel_row = if panel == Overlay::Outline {
+            self.reading.current_section(self.scroll).unwrap_or(0)
+        } else {
+            0
+        };
         self.view.help_scroll = 0;
     }
     pub(crate) fn action_reason(&self, action: Action) -> Option<&'static str> {
         match action {
-            Action::Accept | Action::Complete if self.results.is_empty() => Some("No candidate"),
+            Action::Accept | Action::Complete | Action::Peek if self.results.is_empty() => {
+                Some("No candidate")
+            }
             Action::Prediction if self.inline_candidate().is_none() => Some("No prediction"),
             Action::Follow
             | Action::Find
@@ -229,6 +239,7 @@ impl App {
             }
             Action::Accept => self.accept(true),
             Action::Prediction => self.accept_inline(),
+            Action::Peek => self.open_peek(),
             Action::Follow => {
                 self.focus = Focus::Definition;
                 self.picking = true;
@@ -244,6 +255,87 @@ impl App {
             Action::Help => self.open_panel(Overlay::Help),
             Action::Mouse => self.mouse_enabled = !self.mouse_enabled,
             Action::Quit => self.exit = true,
+        }
+    }
+    pub(crate) fn open_peek(&mut self) {
+        if self.results.is_empty() {
+            return;
+        }
+        if self.view.overlay == Overlay::Peek {
+            self.close_peek();
+            return;
+        }
+        if self.view.overlay == Overlay::Find {
+            self.cancel_find();
+        }
+        self.panel_query.clear();
+        self.view.overlay = Overlay::Peek;
+        self.peek_index = self.selected;
+        self.fetch_peek(self.selected);
+    }
+    pub(crate) fn close_peek(&mut self) {
+        if self.view.overlay == Overlay::Peek {
+            self.view.overlay = Overlay::None;
+            self.peek_preview = None;
+        }
+    }
+    pub(crate) fn accept_peek(&mut self, index: usize) {
+        if index >= self.results.len() {
+            self.close_peek();
+            return;
+        }
+        let peek_preview = self.peek_preview.take();
+        self.close_peek();
+        if index == self.selected {
+            self.accept(true);
+            self.focus = Focus::Definition;
+        } else {
+            self.selected = index;
+            self.reading.clear_find();
+            self.reading.restore_anchor = None;
+            self.scroll = 0;
+            self.max_scroll = 0;
+            self.error = None;
+            self.picking = false;
+            self.focus = Focus::Definition;
+            if let Some(preview) = peek_preview
+                && preview.entry.key == self.results[index].key
+            {
+                self.preview = Some(preview);
+                self.loading = false;
+            } else {
+                self.loading = true;
+                if self
+                    .send_request(Request::Preview(
+                        self.generation,
+                        self.results[index].clone(),
+                    ))
+                    .is_err()
+                {
+                    self.worker_error();
+                }
+            }
+        }
+    }
+    pub(crate) fn set_peek_index(&mut self, index: usize) {
+        if index >= self.results.len() {
+            return;
+        }
+        self.peek_index = index;
+        self.fetch_peek(index);
+    }
+    fn fetch_peek(&mut self, index: usize) {
+        if let Some(candidate) = self.results.get(index) {
+            if self
+                .preview
+                .as_ref()
+                .is_some_and(|p| p.entry.key == candidate.key)
+            {
+                self.peek_preview = self.preview.clone();
+            } else {
+                self.peek_preview = None;
+                let _ = self.send_request(Request::Peek(self.generation, index, candidate.clone()));
+            }
         }
     }
     pub(crate) fn panel_paste(&mut self, text: &str) {
@@ -419,6 +511,44 @@ impl App {
                 }
                 _ => {}
             },
+            Overlay::Peek => {
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                {
+                    match key.code {
+                        KeyCode::Char('p') => {
+                            if self.peek_index > 0 {
+                                self.set_peek_index(self.peek_index - 1);
+                            }
+                        }
+                        KeyCode::Char('n') => {
+                            if self.peek_index + 1 < self.results.len() {
+                                self.set_peek_index(self.peek_index + 1);
+                            }
+                        }
+                        _ => self.close_peek(),
+                    }
+                    return;
+                }
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char(' ') => self.close_peek(),
+                    KeyCode::Enter => self.accept_peek(self.peek_index),
+                    KeyCode::Up | KeyCode::BackTab => {
+                        if self.peek_index > 0 {
+                            self.set_peek_index(self.peek_index - 1);
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Tab => {
+                        if self.peek_index + 1 < self.results.len() {
+                            self.set_peek_index(self.peek_index + 1);
+                        }
+                    }
+                    KeyCode::Home => self.set_peek_index(0),
+                    KeyCode::End => self.set_peek_index(self.results.len().saturating_sub(1)),
+                    _ => self.close_peek(),
+                }
+            }
             Overlay::None => {}
         }
     }

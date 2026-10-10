@@ -1415,3 +1415,126 @@ fn download_completion_opens_first_pack_and_keeps_active_reading_session() {
     assert!(!app.loading);
     assert!(app.download.message.contains("Restart"));
 }
+
+#[test]
+fn peek_mouse_interaction_and_dismissal() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fist");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    app.scroll = 5;
+    let original_scroll = app.scroll;
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+
+    // Open peek via Space
+    stroke(&mut app, KeyCode::Char(' '));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert_eq!(app.view.overlay, Overlay::Peek);
+    assert!(pointer.peek.width > 0);
+
+    // Click outside peek card dismisses it
+    assert!(on_mouse(&mut app, &pointer, click(0, 0)));
+    assert_eq!(app.view.overlay, Overlay::None);
+    assert_eq!(app.scroll, original_scroll);
+
+    // Re-open peek and scroll wheel dismisses it
+    stroke(&mut app, KeyCode::Char(' '));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert_eq!(app.view.overlay, Overlay::Peek);
+    assert!(on_mouse(
+        &mut app,
+        &pointer,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            ..click(0, 0)
+        }
+    ));
+    assert_eq!(app.view.overlay, Overlay::None);
+    assert_eq!(app.scroll, original_scroll);
+
+    // Re-open peek and click inside peek card accepts it
+    stroke(&mut app, KeyCode::Char(' '));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert_eq!(app.view.overlay, Overlay::Peek);
+    let card_x = pointer.peek.x + 2;
+    let card_y = pointer.peek.y + 2;
+    assert!(on_mouse(&mut app, &pointer, click(card_x, card_y)));
+    assert_eq!(app.view.overlay, Overlay::None);
+    assert_eq!(app.focus, Focus::Definition);
+}
+
+#[test]
+fn peek_renders_formatted_card_and_hints() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "hope");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    let mut pointer = Pointer::default();
+
+    // Trigger peek
+    stroke(&mut app, KeyCode::Char(' '));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert_eq!(app.view.overlay, Overlay::Peek);
+
+    let buffer = terminal.backend().buffer();
+    let screen = (0..40)
+        .map(|y| {
+            (0..120)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("Peek"), "{screen}");
+    assert!(screen.contains("hope"), "{screen}");
+    assert!(screen.contains("[Etym 1]"), "{screen}");
+    assert!(screen.contains("Enter read"), "{screen}");
+}
+
+#[test]
+fn outline_view_preselects_current_reading_section() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "hope");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+
+    // Set scroll position to section #2 row
+    let target_row = app.reading.section_row(2).unwrap();
+    app.scroll = target_row;
+    assert_eq!(app.reading.current_section(app.scroll), Some(2));
+
+    // Open outline with 'o'
+    stroke(&mut app, KeyCode::Char('o'));
+    assert_eq!(app.view.overlay, Overlay::Outline);
+    // Outline selection matches current section #2
+    assert_eq!(app.view.panel_row, 2);
+
+    // Esc closes outline
+    stroke(&mut app, KeyCode::Esc);
+    assert_eq!(app.view.overlay, Overlay::None);
+}
+
+#[test]
+fn history_back_closes_peek_card() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "fist");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+
+    app.jump_to("hope");
+    settle(&mut app);
+
+    // Open peek
+    stroke(&mut app, KeyCode::Char(' '));
+    assert_eq!(app.view.overlay, Overlay::Peek);
+
+    // Navigate back in history
+    app.back();
+    assert_eq!(app.view.overlay, Overlay::None);
+}

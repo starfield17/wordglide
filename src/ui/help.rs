@@ -46,9 +46,11 @@ fn help_lines(theme: Theme, focus: Focus) -> Vec<Line<'static>> {
     let mut lines = vec![
         heading("Lookup"),
         body("  Type to search · Enter accept and read · Ctrl+L switch focus"),
-        body("  ↑/↓ or Ctrl+P/N select · Tab/Shift+Tab complete · → or Ctrl+F accept prediction"),
+        body("  ↑/↓ or Ctrl+P/N select · Alt+P quick peek card"),
+        body("  Tab/Shift+Tab complete · → or Ctrl+F accept prediction"),
         heading("Reading"),
         body("  PgUp/PgDn or wheel scroll · Home/End top/bottom"),
+        body("  Space or Alt+P quick peek candidate definition card"),
         body("  f follow a visible word (type the two hint letters)"),
         body("  e examples and references: compact / full"),
         body("  p pronunciation (IPA): short / full"),

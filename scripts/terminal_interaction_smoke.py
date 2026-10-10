@@ -84,6 +84,11 @@ def main():
             session.send(b"\x1b[B\r")
             session.drain(0.1)
             session.output.clear()
+            session.send(b" ")  # Space in definition focus triggers Peek
+            session.wait(lambda: b"Peek" in session.output and b"compare" in session.output, "peek card")
+            session.send(b"\x1b")  # Esc dismisses Peek
+            session.drain(0.1)
+            session.output.clear()
             session.send(b"/")
             paste(session, "recording")
             session.wait(lambda: b"Find" in session.output and b"recording" in session.output, "definition find")

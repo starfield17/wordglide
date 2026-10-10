@@ -4,10 +4,12 @@ use std::{sync::mpsc, thread};
 pub(super) enum Request {
     Search(u64, String),
     Preview(u64, Candidate),
+    Peek(u64, usize, Candidate),
 }
 pub(super) enum Response {
     Search(u64, Result<(Vec<Candidate>, Option<Preview>), String>),
     Preview(u64, String, Result<Preview, String>),
+    Peek(u64, usize, Result<Preview, String>),
 }
 /// Spawn the single worker thread and return its request and response channels.
 pub(super) fn spawn(
@@ -37,6 +39,11 @@ pub(super) fn spawn(
                 Request::Preview(id, candidate) => Response::Preview(
                     id,
                     candidate.key.clone(),
+                    dictionary.preview(&candidate).map_err(|e| format!("{e:#}")),
+                ),
+                Request::Peek(id, index, candidate) => Response::Peek(
+                    id,
+                    index,
                     dictionary.preview(&candidate).map_err(|e| format!("{e:#}")),
                 ),
             };

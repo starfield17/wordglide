@@ -157,6 +157,7 @@ impl App {
             match key.code {
                 KeyCode::Left => self.back(),
                 KeyCode::Right => self.forward(),
+                KeyCode::Char('p') => self.execute_action(Action::Peek),
                 KeyCode::Backspace if self.focus == Focus::Input => {
                     let previous = prev_word_boundary(&self.input, self.cursor);
                     self.input.drain(previous..self.cursor);
@@ -252,6 +253,9 @@ impl App {
             }
             KeyCode::Char('?') if self.focus == Focus::Definition => {
                 self.open_panel(Overlay::Help);
+            }
+            KeyCode::Char(' ') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Peek);
             }
             KeyCode::Home if self.focus == Focus::Definition => self.scroll = 0,
             KeyCode::End if self.focus == Focus::Definition => self.scroll = self.max_scroll,

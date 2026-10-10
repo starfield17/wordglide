@@ -26,6 +26,7 @@ impl App {
     }
 
     pub(super) fn restore(&mut self, old: Location) {
+        self.close_peek();
         self.completion = None;
         self.pending_completion.clear();
         self.generation += 1;

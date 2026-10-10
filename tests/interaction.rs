@@ -35,6 +35,14 @@ fn key(app: &mut App, code: KeyCode) {
     app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
 }
 
+fn alt(app: &mut App, code: KeyCode) {
+    app.handle_key(KeyEvent::new(code, KeyModifiers::ALT));
+}
+
+fn ctrl(app: &mut App, code: KeyCode) {
+    app.handle_key(KeyEvent::new(code, KeyModifiers::CONTROL));
+}
+
 fn screen(app: &mut App, width: u16, height: u16) -> Vec<String> {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
     terminal.draw(|frame| draw(frame, app)).unwrap();
@@ -316,4 +324,212 @@ fn deleting_a_separator_keeps_the_caret_outside_joined_graphemes() {
         assert!(app.input.is_empty());
         assert_eq!(app.cursor, 0);
     }
+}
+
+#[test]
+fn etymology_numbers_appear_in_outline_and_definition_header() {
+    let (_dir, mut app) = app("hope");
+    key(&mut app, KeyCode::Enter);
+    settle(&mut app);
+    let view = screen(&mut app, 120, 30).join("\n");
+    // Definition header contains [Etym 1]
+    assert!(view.contains("[Etym 1]"), "{view}");
+
+    // Open outline
+    key(&mut app, KeyCode::Char('o'));
+    let outline = screen(&mut app, 120, 30).join("\n");
+    assert!(outline.contains("Outline"), "{outline}");
+    assert!(outline.contains("[Etym 1]"), "{outline}");
+    assert!(outline.contains("[Etym 2]"), "{outline}");
+    assert!(outline.contains("[Etym 3]"), "{outline}");
+    assert!(outline.contains("[Etym 4]"), "{outline}");
+
+    // Esc closes outline
+    key(&mut app, KeyCode::Esc);
+
+    // Jump to next section using ']'
+    key(&mut app, KeyCode::Char(']'));
+    let after_next = screen(&mut app, 120, 30).join("\n");
+    assert!(after_next.contains("hope"), "{after_next}");
+
+    // Entry without etymology numbers
+    app.jump_to("bubble");
+    settle(&mut app);
+    let bubble_view = screen(&mut app, 120, 30).join("\n");
+    assert!(!bubble_view.contains("[Etym"), "{bubble_view}");
+    key(&mut app, KeyCode::Char('o'));
+    let bubble_outline = screen(&mut app, 120, 30).join("\n");
+    assert!(!bubble_outline.contains("[Etym"), "{bubble_outline}");
+}
+
+#[test]
+fn peek_floating_card_quick_comparison_and_escape() {
+    let (_dir, mut app) = app("hope");
+    key(&mut app, KeyCode::Enter);
+    settle(&mut app);
+    screen(&mut app, 120, 30);
+    key(&mut app, KeyCode::PageDown);
+    let scroll_before = app.scroll;
+    let history_before = app.history_len();
+
+    // Press Space in definition focus to open Peek
+    key(&mut app, KeyCode::Char(' '));
+    settle(&mut app);
+    let peek_screen = screen(&mut app, 120, 30).join("\n");
+    assert!(peek_screen.contains("Peek"), "{peek_screen}");
+    assert!(peek_screen.contains("compare"), "{peek_screen}");
+    assert!(peek_screen.contains("hope"), "{peek_screen}");
+    // Reading position and history remain untouched while peeking
+    assert_eq!(app.scroll, scroll_before);
+    assert_eq!(app.history_len(), history_before);
+
+    // Compare with candidate #1 using Down arrow
+    key(&mut app, KeyCode::Down);
+    settle(&mut app);
+    let peek_down = screen(&mut app, 120, 30).join("\n");
+    assert!(peek_down.contains("Peek"), "{peek_down}");
+    assert_eq!(app.scroll, scroll_before);
+    assert_eq!(app.history_len(), history_before);
+
+    // Compare back with candidate #0 using Up arrow
+    key(&mut app, KeyCode::Up);
+    settle(&mut app);
+    let peek_up = screen(&mut app, 120, 30).join("\n");
+    assert!(peek_up.contains("hope"), "{peek_up}");
+    assert_eq!(app.scroll, scroll_before);
+    assert_eq!(app.history_len(), history_before);
+
+    // Press Esc to dismiss Peek card
+    key(&mut app, KeyCode::Esc);
+    let restored = screen(&mut app, 120, 30).join("\n");
+    assert!(!restored.contains("Peek ·"), "{restored}");
+    assert_eq!(app.scroll, scroll_before);
+    assert_eq!(app.history_len(), history_before);
+
+    // Toggle peek with Space and dismiss with Space
+    key(&mut app, KeyCode::Char(' '));
+    assert!(screen(&mut app, 120, 30).join("\n").contains("Peek ·"));
+    key(&mut app, KeyCode::Char(' '));
+    assert!(!screen(&mut app, 120, 30).join("\n").contains("Peek ·"));
+    assert_eq!(app.scroll, scroll_before);
+}
+
+#[test]
+fn peek_enter_accepts_candidate_and_opens_reading() {
+    let (_dir, mut app) = app("hope");
+    key(&mut app, KeyCode::Enter);
+    settle(&mut app);
+    screen(&mut app, 120, 30);
+
+    // Open peek and select candidate #1
+    key(&mut app, KeyCode::Char(' '));
+    settle(&mut app);
+    key(&mut app, KeyCode::Down);
+    settle(&mut app);
+
+    // Press Enter to accept the peeked candidate
+    key(&mut app, KeyCode::Enter);
+    settle(&mut app);
+    let view = screen(&mut app, 120, 30).join("\n");
+    assert!(!view.contains("Peek ·"), "{view}");
+    assert_eq!(app.focus, wordglide::Focus::Definition);
+}
+
+#[test]
+fn peek_from_input_focus_with_alt_p() {
+    let (_dir, mut app) = app("hope");
+    assert_eq!(app.focus, wordglide::Focus::Input);
+
+    // Alt+P opens Peek from Input focus
+    alt(&mut app, KeyCode::Char('p'));
+    settle(&mut app);
+    let peek = screen(&mut app, 120, 30).join("\n");
+    assert!(peek.contains("Peek"), "{peek}");
+    assert!(peek.contains("hope"), "{peek}");
+
+    // Esc dismisses Peek
+    key(&mut app, KeyCode::Esc);
+    let dismissed = screen(&mut app, 120, 30).join("\n");
+    assert!(!dismissed.contains("Peek ·"), "{dismissed}");
+    assert_eq!(app.focus, wordglide::Focus::Input);
+}
+
+#[test]
+fn peek_ctrl_n_ctrl_p_and_tab_navigation() {
+    let (_dir, mut app) = app("hope");
+    key(&mut app, KeyCode::Enter);
+    settle(&mut app);
+
+    // Open peek with Space
+    key(&mut app, KeyCode::Char(' '));
+    let s0 = screen(&mut app, 120, 30).join("\n");
+    assert!(s0.contains("Peek"), "{s0}");
+    assert!(s0.contains("(1/"), "{s0}");
+
+    // Ctrl+N compares candidate #1
+    ctrl(&mut app, KeyCode::Char('n'));
+    let s1 = screen(&mut app, 120, 30).join("\n");
+    assert!(s1.contains("(2/"), "{s1}");
+
+    // Tab compares candidate #2
+    key(&mut app, KeyCode::Tab);
+    let s2 = screen(&mut app, 120, 30).join("\n");
+    assert!(s2.contains("(3/"), "{s2}");
+
+    // BackTab compares back to #1
+    key(&mut app, KeyCode::BackTab);
+    let s1_back = screen(&mut app, 120, 30).join("\n");
+    assert!(s1_back.contains("(2/"), "{s1_back}");
+
+    // Ctrl+P compares back to #0
+    ctrl(&mut app, KeyCode::Char('p'));
+    let s0_back = screen(&mut app, 120, 30).join("\n");
+    assert!(s0_back.contains("(1/"), "{s0_back}");
+
+    // End jumps to last candidate
+    key(&mut app, KeyCode::End);
+    let s_last = screen(&mut app, 120, 30).join("\n");
+    let total = app.results.len();
+    assert!(s_last.contains(&format!("({total}/{total})")), "{s_last}");
+
+    // Home jumps back to first candidate
+    key(&mut app, KeyCode::Home);
+    let s_first = screen(&mut app, 120, 30).join("\n");
+    assert!(s_first.contains("(1/"), "{s_first}");
+
+    // Esc dismisses
+    key(&mut app, KeyCode::Esc);
+    let s_closed = screen(&mut app, 120, 30).join("\n");
+    assert!(!s_closed.contains("Peek ·"), "{s_closed}");
+}
+
+#[test]
+fn peek_promotes_cached_preview_instantly_on_enter() {
+    let (_dir, mut app) = app("hope");
+    key(&mut app, KeyCode::Enter);
+    settle(&mut app);
+
+    // Open peek and select candidate #1
+    key(&mut app, KeyCode::Char(' '));
+    key(&mut app, KeyCode::Down);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        app.poll();
+        let text = screen(&mut app, 120, 30).join("\n");
+        if text.contains("Peek") && !text.contains("Loading definition…") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "peek definition did not load");
+        thread::sleep(Duration::from_millis(1));
+    }
+    let expected_headword = app.results[1].headword.clone();
+
+    // Enter accepts candidate #1
+    key(&mut app, KeyCode::Enter);
+    // Preview was promoted instantly without triggering loading spinner
+    assert!(!app.loading);
+    assert_eq!(app.selected, 1);
+    assert_eq!(app.focus, wordglide::Focus::Definition);
+    let s = screen(&mut app, 120, 30).join("\n");
+    assert!(s.contains(&expected_headword), "{s}");
 }

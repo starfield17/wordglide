@@ -64,6 +64,8 @@ pub struct App {
     pub(crate) panel_query: String,
     pub(crate) mouse_enabled: bool,
     pub(crate) dictionary_notice: Option<String>,
+    pub(crate) peek_index: usize,
+    pub(crate) peek_preview: Option<Preview>,
     lexicon: Option<Lexicon>,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
@@ -117,6 +119,8 @@ impl App {
             panel_query: String::new(),
             mouse_enabled: true,
             dictionary_notice: notice,
+            peek_index: 0,
+            peek_preview: None,
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -233,6 +237,7 @@ impl App {
     }
 
     fn search(&mut self) {
+        self.close_peek();
         self.completion = None;
         self.pending_completion.clear();
         // Any new lookup branches away from the states reached by going back.
@@ -317,6 +322,17 @@ impl App {
                     }
                     changed = true;
                 }
+                Response::Peek(id, index, result)
+                    if id == self.generation
+                        && self.view.overlay == Overlay::Peek
+                        && self.peek_index == index =>
+                {
+                    match result {
+                        Ok(preview) => self.peek_preview = Some(preview),
+                        Err(error) => self.error = Some(error),
+                    }
+                    changed = true;
+                }
                 _ => {}
             }
         }
@@ -349,7 +365,7 @@ impl App {
         true
     }
 
-    fn select(&mut self, selected: usize) {
+    pub(crate) fn select(&mut self, selected: usize) {
         if selected == self.selected || selected >= self.results.len() {
             return;
         }

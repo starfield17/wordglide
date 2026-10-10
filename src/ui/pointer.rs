@@ -69,6 +69,7 @@ pub(super) struct Pointer {
     rows: Vec<HitRow>,
     pub(super) appearance_rows: [Region; 7],
     pub(super) download_button: Region,
+    pub(super) peek: Region,
 }
 
 impl Pointer {
@@ -76,6 +77,7 @@ impl Pointer {
         self.input = Region::default();
         self.input_positions.clear();
         self.panel = Region::default();
+        self.peek = Region::default();
         self.command_rows.clear();
         self.navigation_rows.clear();
         self.footer.clear();
@@ -185,6 +187,23 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
                 app.view.help_scroll = app.view.help_scroll.saturating_add(WHEEL_LINES)
             }
             MouseEventKind::Down(MouseButton::Left) => app.view.overlay = Overlay::None,
+            _ => return false,
+        }
+        return true;
+    }
+    if app.view.overlay == Overlay::Peek {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if pointer.peek.contains(mouse.column, mouse.row) {
+                    let index = app.peek_index;
+                    app.accept_peek(index);
+                } else {
+                    app.close_peek();
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                app.close_peek();
+            }
             _ => return false,
         }
         return true;

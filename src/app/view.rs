@@ -22,6 +22,7 @@ pub(crate) enum Overlay {
     History,
     Find,
     Download,
+    Peek,
 }
 
 /// Lifecycle state of the dictionary downloader.
