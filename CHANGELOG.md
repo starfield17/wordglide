@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.3
 
 - Etymology branches: entries with multiple etymologies show `[Etym n]` in group
   headers and in the outline view (`o`), making homographs easy to navigate.

@@ -550,7 +550,7 @@ incorporated.
 
 ## Updating to schema 4
 
-Wordglide v0.4.2 requires a schema-4 dictionary. Update the program, then use
+Wordglide v0.4.2 and newer requires a schema-4 dictionary. Update the program, then use
 F2 Settings or `wordglide --download-data` to install the new pack. If `--data`
 or `WORDGLIDE_DATA` is set, update that override to a schema-4 pack as well.
 The validated dictionary is published as
