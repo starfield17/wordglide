@@ -307,8 +307,6 @@ bytes and never calls the data generator.
     terminal-display cases. Document technical verification separately from
     review by a language speaker; the project need not promise editorial review
     or official maintenance of every language.
-- Schema-5 data publication remains a release prerequisite: publish and verify
-  the new archive, then replace data-release.json with its real tag/checksum.
 - Windows support: no target and no WinAPI terminal paths, until POSIX shells are fully settled.
 - Open source definitions and example coverage do not equal Oxford editorial quality.
 - Word frequency cannot infer the relative frequency of senses within a word.

@@ -120,8 +120,8 @@ and were not executed locally.
 
 ## Publication status
 
-The schema-5 archive above is validated locally and has not been published.
-`data-release.json` still pins the previously published schema-4 asset. Publish
-and verify the new data asset, then update that pin with its real tag/checksum
-before releasing the 0.5 program. Until then, use a locally built schema-5 pack
-with `--data`; the public downloader cannot supply the new pack yet.
+The validated schema-5 archive is distributed as
+[data-v5-20260902](https://github.com/starfield17/wordglide/releases/tag/data-v5-20260902)
+and pinned in `data-release.json` with the SHA-256 above. Program releases reuse
+these verified bytes. Later dictionary updates must publish and verify the
+archive before changing the pin.

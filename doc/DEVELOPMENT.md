@@ -194,11 +194,12 @@ Code: MIT. Data: its original licenses and attribution; see [THIRD_PARTY.md](../
 
 ## Data publication prerequisite
 
-Publish and verify a matching schema-5 archive before releasing the current
-program. `data-release.json` currently pins an asset incompatible with the source
-build; release preflight blocks until the pin contains the new asset's real tag
-and checksum. Until publication, use the sample or a locally built pack via
-`--data`. The public downloader cannot supply the current source format yet.
+Publish and verify a matching dictionary archive before releasing the program.
+`data-release.json` pins the verified schema-5 asset from
+[data-v5-20260902](https://github.com/starfield17/wordglide/releases/tag/data-v5-20260902).
+For later data updates, publish the archive first, then record its real tag and
+checksum in the pin. Release preflight checks that the published asset exists;
+assembly verifies its checksum, format and every entry before program publication.
 
 Future language identity, normalization, ranking, following and community
 packaging boundaries are recorded in [SPEC.md](../SPEC.md#found--not-doing).

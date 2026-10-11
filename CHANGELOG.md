@@ -12,8 +12,8 @@
   Group.ipa is the projection of structured pronunciation records.
 - Document future Chinese–Chinese/Japanese–Japanese pack extension points; no
   additional language or multi-dictionary support is introduced.
-- Program release remains gated on publishing and pinning the verified schema-5
-  dictionary asset.
+- Distribute a matching verified schema-5 dictionary archive, pinned for
+  reproducible program releases.
 
 ## 0.4.3
 

@@ -50,8 +50,8 @@ For an unpacked dictionary you already have:
 wordglide --data PATH_TO_PACK 'take off'
 ```
 
-For the current unreleased source build, use the included sample or a locally
-built dictionary; see [building and trying the sample](doc/DEVELOPMENT.md#build-and-try-the-real-data-sample).
+To build from source or try the included sample, see
+[building and trying the sample](doc/DEVELOPMENT.md#build-and-try-the-real-data-sample).
 
 ## Quick keys
 
