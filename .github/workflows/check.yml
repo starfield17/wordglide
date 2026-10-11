@@ -68,4 +68,5 @@ jobs:
           python3 scripts/terminal_no_data_smoke.py --binary target/debug/wordglide
           python3 scripts/terminal_smoke.py --binary target/debug/wordglide --data data/ci-sample
           python3 scripts/terminal_interaction_smoke.py --binary target/debug/wordglide --data data/ci-sample
+          python3 scripts/terminal_content_smoke.py --binary target/debug/wordglide --data data/ci-sample
           python3 scripts/terminal_appearance_smoke.py --binary target/debug/wordglide --data data/ci-sample

@@ -251,6 +251,15 @@ impl App {
             KeyCode::Char('e') if self.focus == Focus::Definition && self.preview.is_some() => {
                 self.view.expand_examples = !self.view.expand_examples;
             }
+            KeyCode::Char('v') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Forms)
+            }
+            KeyCode::Char('r') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Relations)
+            }
+            KeyCode::Char('t') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Etymology)
+            }
             KeyCode::Char('?') if self.focus == Focus::Definition => {
                 self.open_panel(Overlay::Help);
             }

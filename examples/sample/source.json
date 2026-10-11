@@ -1,5 +1,6 @@
 {
   "source": "English Wiktionary via raw Wiktextract/Kaikki",
+  "language_code": "en",
   "source_url": "https://kaikki.org/dictionary/rawdata.html",
   "snapshot": "2026-09-02-sampled-2026-10-06",
   "input_sha256": "dcad46204c36ad4c2967a94cff6dea689dfa9f17ed3013cf628761592954f941",
@@ -84,7 +85,12 @@
         ],
         "senses_with_examples": 2
       }
-    }
+    },
+    "groups_with_etymology": 263,
+    "groups_with_forms": 229,
+    "groups_with_relations": 188,
+    "pronunciations_with_labels": 1523,
+    "senses_with_relations": 263
   },
   "wordfreq_version": "3.1.1",
   "wordfreq_notices": {
@@ -110,9 +116,5 @@
     "Definitions are source text, not rewritten learner definitions.",
     "Quotations retain source references; original authors' rights may differ.",
     "Multiword frequency is estimated; wordfreq is a roughly pre-2022 usage snapshot."
-  ],
-  "reranked_from": {
-    "ranking": "100*zipf-2*chars-100*extra_words;exact>inflection>prefix>fuzzy;key_tie",
-    "entries_sha256": "fe772f3a9e8a46dc69b4c9c88e49e89135e6d6246d93a8b955d6ff51f1bc2f52"
-  }
+  ]
 }

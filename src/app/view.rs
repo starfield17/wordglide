@@ -1,6 +1,7 @@
 /// Display toggles that do not affect lookup or ranking.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ViewOptions {
+    pub(crate) content: ContentDisplay,
     pub(crate) reading_layout: ReadingLayout,
     pub(crate) expand_ipa: bool,
     pub(crate) expand_examples: bool,
@@ -9,6 +10,14 @@ pub(crate) struct ViewOptions {
     pub(crate) panel_row: usize,
     pub(crate) help_scroll: usize,
     pub(crate) help_page: usize,
+}
+
+/// Session-only source-content controls, independent of saved reading preferences.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ContentDisplay {
+    pub(crate) forms: bool,
+    pub(crate) relations: bool,
+    pub(crate) etymology: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

@@ -14,7 +14,7 @@ pub(crate) use actions::Action;
 use completion::Completion;
 pub(crate) use reading::{Anchor, ReadingState};
 pub(crate) use reading::{LogicalLine, TextRole, TextRow, document};
-pub(crate) use view::{DownloadState, Overlay, ViewOptions};
+pub(crate) use view::{ContentDisplay, DownloadState, Overlay, ViewOptions};
 pub use view::{ReadingLayout, ReadingPreferences};
 use worker::{Request, Response};
 

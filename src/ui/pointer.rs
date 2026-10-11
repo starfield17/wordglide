@@ -4,7 +4,6 @@ use crate::{
 };
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
-use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::reading::ReadingLine;
@@ -95,8 +94,9 @@ impl Pointer {
         for (i, line) in visible.iter().enumerate() {
             let y = inner.y + i as u16;
             let mut tokens = Vec::new();
-            let mut column = inner.x;
-            for token in line.text.split_word_bounds() {
+            for (range, target) in line.lookup_spans() {
+                let token = &line.text[range.clone()];
+                let column = inner.x + line.text[..range.start].width() as u16;
                 let width = token.width() as u16;
                 // Whitespace and punctuation cannot be looked up; skip allocating
                 // hit targets for them.
@@ -104,10 +104,9 @@ impl Pointer {
                     tokens.push(HitToken {
                         start: column,
                         end: column + width,
-                        word: token.to_string(),
+                        word: target,
                     });
                 }
-                column += width;
             }
             self.rows.push(HitRow { y, tokens });
         }

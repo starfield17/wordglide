@@ -86,7 +86,7 @@ reading preferences. Updates to an active dictionary leave its worker, query,
 history, and reading position untouched. Restart selects the new pack unless
 --data or WORDGLIDE_DATA overrides it. Failed/cancelled downloads leave Settings
 available for retry.
-Validation: schema 4 only; schema 2/3 are rejected with dictionary-update and
+Validation: schema 5 only; schema 2/3/4 are rejected with dictionary-update and
 --data/WORDGLIDE_DATA override guidance. Normal open checks structure and file lengths, plus
 the loaded FST buffer CRC. No default SHA scan, vocabulary traversal, or definition-block decompression. `wordglide --verify-data [--data DIRECTORY]` performs full
 verification including every compressed entry and entry/index score, headword,
@@ -171,6 +171,26 @@ config or an unknown stored theme fails before raw mode and is never overwritten
 `--info` and `--verify-data` bypass appearance configuration. Preference file I/O
 belongs to the terminal session, never the dictionary worker or data pack.
 
+
+Rich content (0.5): prepared groups retain source word forms/tags, etymology
+text, structured IPA variants with dialect tags/notes, and source term relations.
+Senses retain their own synonyms/antonyms. Group-level relations never migrate
+into a guessed sense; source qualifiers and attribution are displayed. Derived
+and related terms keep source categories rather than being relabeled collocations.
+Exact duplicate records are removed stably; different labels/notes stay distinct.
+The existing ranking, inverse modern-form lookup, and two-example limit stay fixed.
+Source language_code is recorded as en in preparation provenance.
+Reading v expands forms, r expands relations, and t expands etymology. These
+three controls are session-only, appear in actions/help, and never enter config.
+Compact forms and each relation category show the first four source items plus
+an omitted count. Etymology is collapsed by default; p still controls the first
+two versus all structured pronunciation records with original labels/notes.
+Group-level rich content is rendered once across modern/historical partitions.
+Explicit term spans make forms and relation phrases whole lookup targets in
+keyboard hints and mouse hit testing, including wrapped fragments. Absent targets
+remain source text. Reflow/toggles/navigation restore source-addressed positions;
+folded content falls back to its parent sense or group. Find searches visible text.
+
 ## Do not build
 - N1 No network during normal startup or lookup, and no LLM dependencies.
   Only an explicitly requested prebuilt-pack installation uses the network ← S2
@@ -194,7 +214,7 @@ belongs to the terminal session, never the dictionary worker or data pack.
 ## Frame
 Compile source data to a local pack. Runtime indexes contain compact binary candidate metadata and prebuilt ranking;
 definition text and necessary word-form targets are read on demand and cached within a byte budget.
-Schema 4 stores fixed-order private MessagePack entries in independent,
+Schema 5 stores fixed-order private MessagePack entries in independent,
 checksummed Zstd-level-19 blocks of at most 1 MiB, with an up-to-64-KiB shared
 compression dictionary trained deterministically at build time. Small packs
 with fewer than 256 samples or 256 KiB of training input omit that dictionary.
@@ -205,7 +225,8 @@ completion/checksum, rejects tails, validates collection lengths before allocati
 and checks decoded keys. Parsed entries retain a 32 MiB cache budget charged
 against owned collection/string capacities; uncompressed blocks have a separate
 8 MiB cache. Full verification decompresses each block once and checks every entry.
-The same-source installed pack target is <=190 MiB and download target <=140 MiB;
+Enriched source content takes priority over the former schema-4 size targets
+(190 MiB installed / 140 MiB downloaded). Record actual schema-5 sizes and coverage;
 startup increment <=5 ms, uncached lookup+preview P95 increment <=5 ms,
 input-to-draw P95 <=50 ms and resident-memory target <=512 MiB. Benchmark comparisons
 use fixed queries and state OS-cache conditions rather than claiming cold disk.
@@ -215,7 +236,7 @@ installation with a 128 MiB decoder-memory ceiling. Program archives remain gzip
 Pack members: manifest.json, entries.bin, entries.idx, lexicon.bin, words.fst,
 and THIRD_PARTY.md (archive attribution). Manifest sizes/SHA-256 cover the four
 binary files; source provenance, ranking and public JSON shapes are unchanged.
-`entries.idx` uses a 32-byte little-endian header: magic WGLENT04, u32 entry
+`entries.idx` uses a 32-byte little-endian header: magic WGLENT05, u32 entry
 count, u32 block count, u32 dictionary length, zero u32 reserved, u64 body length.
 Then dictionary bytes, 24-byte block records (u64 body offset; u32 compressed
 length, raw length, first entry ID, entry count), and eight-byte entry locators
@@ -229,8 +250,13 @@ leaf winners are their candidate IDs or EMPTY. The POS table stores eight-byte
 UTF-8 ranges before the shared string pool.
 MessagePack tuple fields are frozen independently of public structs: entry
 (key, headword, score, groups, lemmas, preview_lemmas, source_url); group
-(headword, pos, ipa, senses, etymology_number); sense (glosses, tags, examples,
-targets); example (text, reference, kind). No source field is omitted or rewritten.
+(headword, pos, pronunciations, senses, etymology_number, etymology_text, forms,
+relations); sense (glosses, tags, examples, targets, relations); example
+(text, reference, kind); pronunciation (ipa, tags, note); form (form, tags);
+relation (kind u8, word, tags, sense qualifier, source). Relation kinds are
+0 synonym, 1 antonym, 2 derived, 3 related; unknown kinds are rejected.
+Public Group.ipa is the distinct, source-ordered projection of pronunciations;
+the builder rejects disagreement. New source fields are retained, never rewritten.
 F1 Only build and prepare write pack data; startup never decompresses entries or
 rebuilds the ranking tree ← S2 — check: scripts/test_boundaries.py;
 check: cargo test --doc.
@@ -240,7 +266,7 @@ enumerates and sorts all matches ← S3
 review: src/index.rs prefix walks the prebuilt range-max tree.
 F3 The private entry codec bounds raw entries/blocks to 1 MiB, compressed blocks to
 2 MiB, and rejects truncated, tailed, checksum-failing, or malformed MessagePack streams ← S2
-— check: cargo test entry_codec::tests; cargo test --test schema4.
+— check: cargo test entry_codec::tests; cargo test --test schema5.
 F4 The installer copies verified prebuilt bytes and never calls the data
 generator ← S2 — check: scripts/test_boundaries.py.
 Oracle: compare indexed top-k with exhaustive fixed-score ranking in tests;
@@ -249,6 +275,40 @@ Boundary check: compiler privacy/doc test; the installer copies verified prebuil
 bytes and never calls the data generator.
 
 ## Found · Not doing
+- TODO: future monolingual packs (Chinese–Chinese, Japanese–Japanese, etc.).
+  Current runtime/preparation remains English-only and opens one pack per session.
+  Current community English authoring is documented in
+  [doc/PACK_AUTHORING.md](doc/PACK_AUTHORING.md); the following is future design,
+  not an implemented language/profile interface.
+  Keep source forms, pronunciation labels and relation targets Unicode strings,
+  not English grammar enums or whitespace-split phrase IDs. Future work must add
+  these capabilities at their existing owners:
+  - Formal pack identity: stable ID, display name, data version, source/attribution,
+    and separate BCP 47 headword and definition language tags. Provenance labels
+    alone never select runtime behavior; Chinese–Chinese and Japanese–Japanese
+    are the first validation targets.
+  - One public canonical input contract for official source adapters and community
+    converters. Keep source conversion separate from generic build/verification;
+    no particular raw source or frequency provider is required for community data.
+  - Explicit, versioned built-in language policies: build/query normalization must
+    agree; tokenization/follow and inflection handling require language tests.
+    Ranking permits uniform baseline scores without frequency data and author
+    scores with their provenance. Do not apply English wordfreq, length penalties,
+    inflection tags or word boundaries to another language by default. Reject
+    unsupported policies rather than silently substituting English rules. Packs
+    remain data-only and never load executable conversion code or plugins.
+  - Dictionary-only packaging independent of program binaries, fixed English
+    names and repository attribution. Carry the pack's own notices, version and
+    checksums; community recipients initially extract and select via a local path.
+    Continue opening one pack per session. Multi-dictionary switching, community
+    download catalogs and plugins require separate design; official downloads
+    remain explicitly maintained by the project.
+  - Contributions include lookup, normalization-collision, phrase follow and
+    terminal-display cases. Document technical verification separately from
+    review by a language speaker; the project need not promise editorial review
+    or official maintenance of every language.
+- Schema-5 data publication remains a release prerequisite: publish and verify
+  the new archive, then replace data-release.json with its real tag/checksum.
 - Windows support: no target and no WinAPI terminal paths, until POSIX shells are fully settled.
 - Open source definitions and example coverage do not equal Oxford editorial quality.
 - Word frequency cannot infer the relative frequency of senses within a word.
@@ -275,3 +335,11 @@ one shared dictionary and combined checksums; manual dispatch never publishes.
   checks, and F1–F4 Frame invariants; N1–N7 meaning is unchanged.
 - 2026-10-10 Spirit: etymology branch outline navigation and candidate peek
   card overlay; non-destructive preview preserves reading position and history.
+
+## Amendments
+- 2026-10-11: user approved all five source-content additions, schema-5-only
+  delivery, content completeness over former pack-size targets, and a documented
+  future monolingual-language TODO. Soul and runtime/build separation remain fixed.
+- 2026-10-11: documented current community English pack authoring and future
+  multilingual identity, policy and independent-packaging boundaries. Runtime,
+  schema and official release/download interfaces are unchanged by this addition.

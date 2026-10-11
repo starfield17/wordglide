@@ -45,6 +45,41 @@ class RankingTests(unittest.TestCase):
 
 
 class ExtractTests(unittest.TestCase):
+    def test_rich_content_preserves_scope_labels_and_distinct_pronunciations(self):
+        raw = {"word": "Test", "lang_code": "en", "pos": "verb",
+               "etymology_number": 2, "etymology_text": "Source text\n漢字 *root?",
+               "sounds": [{"ipa": "/test/", "tags": ["UK"], "note": "source note"},
+                          {"ipa": "/test/", "tags": ["US"]},
+                          {"ipa": "/test/", "tags": ["UK"], "note": "source note"}],
+               "forms": [{"form": "Tested", "tags": ["past", "nonstandard"]}],
+               "synonyms": [{"word": "word-level", "sense": "source qualifier", "source": "Thesaurus:Test"}],
+               "derived": [{"word": "take off", "tags": ["rare"]}],
+               "related": [{"word": "related source term"}],
+               "senses": [{"glosses": ["old"], "tags": ["archaic"],
+                           "antonyms": [{"word": "old opposite"}]},
+                          {"glosses": ["modern"], "synonyms": [{"word": "modern synonym"}]}]}
+        _, group, _ = extract(raw)
+        self.assertEqual(group["etymology_text"], raw["etymology_text"])
+        self.assertEqual(group["forms"], raw["forms"])
+        self.assertEqual(group["ipa"], ["/test/"])
+        self.assertEqual(group["pronunciations"], [
+            {"ipa": "/test/", "tags": ["UK"], "note": "source note"},
+            {"ipa": "/test/", "tags": ["US"], "note": ""}])
+        self.assertEqual([r["kind"] for r in group["relations"]], ["synonym", "derived", "related"])
+        self.assertEqual(group["relations"][0]["sense"], "source qualifier")
+        self.assertEqual(group["relations"][0]["source"], "Thesaurus:Test")
+        self.assertEqual(group["senses"][0]["relations"][0]["word"], "modern synonym")
+        self.assertEqual(group["senses"][1]["relations"][0]["word"], "old opposite")
+        self.assertNotIn("word-level", [r["word"] for s in group["senses"] for r in s["relations"]])
+
+    def test_invalid_rich_source_fields_are_rejected(self):
+        base = {"word": "test", "lang_code": "en", "pos": "noun", "senses": [{"glosses": ["source"]}]}
+        for field, value in [("etymology_text", []), ("synonyms", ["invalid"]),
+                             ("forms", [{"form": "tests", "tags": "plural"}]),
+                             ("sounds", [{"ipa": "/test/", "note": []}])]:
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                extract({**base, field: value})
+
     def test_normalization_matches_shared_cross_language_cases(self):
         # Shared with the runtime's normalize() unit test, so the builder and the
         # lookup path cannot drift apart silently.

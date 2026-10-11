@@ -19,6 +19,9 @@ pub(crate) enum Action {
     Bottom,
     Examples,
     Ipa,
+    Forms,
+    Relations,
+    Etymology,
     Back,
     Forward,
     Settings,
@@ -29,7 +32,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    pub(crate) const ALL: [Self; 22] = [
+    pub(crate) const ALL: [Self; 25] = [
         Self::Commands,
         Self::Complete,
         Self::NewLookup,
@@ -46,6 +49,9 @@ impl Action {
         Self::Bottom,
         Self::Examples,
         Self::Ipa,
+        Self::Forms,
+        Self::Relations,
+        Self::Etymology,
         Self::Back,
         Self::Forward,
         Self::Settings,
@@ -55,6 +61,9 @@ impl Action {
     ];
     pub(crate) fn title(self) -> &'static str {
         match self {
+            Self::Forms => "Expand word forms",
+            Self::Relations => "Expand source term relations",
+            Self::Etymology => "Expand etymology text",
             Self::Find => "Find text in this definition",
             Self::Outline => "Definition outline",
             Self::Layout => "Reading layout: split / focus",
@@ -81,6 +90,9 @@ impl Action {
     }
     pub(crate) fn shortcut(self) -> &'static str {
         match self {
+            Self::Forms => "v",
+            Self::Relations => "r",
+            Self::Etymology => "t",
             Self::Find => "/",
             Self::Outline => "o",
             Self::Layout => "F4",
@@ -140,9 +152,15 @@ impl App {
             | Action::Bottom
             | Action::Examples
             | Action::Ipa
+            | Action::Forms
+            | Action::Relations
+            | Action::Etymology
                 if self.preview.is_none() || self.loading =>
             {
                 Some("No ready definition")
+            }
+            Action::Forms | Action::Relations | Action::Etymology if !self.has_content(action) => {
+                Some("No source content")
             }
             Action::Navigation if self.history.is_empty() && self.forward.is_empty() => {
                 Some("No navigation locations")
@@ -151,6 +169,23 @@ impl App {
             Action::Forward if self.forward.is_empty() => Some("No next location"),
             _ => None,
         }
+    }
+    fn has_content(&self, action: Action) -> bool {
+        self.preview.as_ref().is_some_and(|preview| {
+            std::iter::once(&preview.entry)
+                .chain(&preview.related)
+                .any(|entry| {
+                    entry.groups.iter().any(|group| match action {
+                        Action::Forms => !group.forms.is_empty(),
+                        Action::Relations => {
+                            !group.relations.is_empty()
+                                || group.senses.iter().any(|sense| !sense.relations.is_empty())
+                        }
+                        Action::Etymology => !group.etymology_text.is_empty(),
+                        _ => false,
+                    })
+                })
+        })
     }
     pub(crate) fn action_state(&self, action: Action) -> &'static str {
         match action {
@@ -173,6 +208,27 @@ impl App {
                     "on"
                 } else {
                     "off"
+                }
+            }
+            Action::Forms => {
+                if self.view.content.forms {
+                    "full"
+                } else {
+                    "compact"
+                }
+            }
+            Action::Relations => {
+                if self.view.content.relations {
+                    "full"
+                } else {
+                    "compact"
+                }
+            }
+            Action::Etymology => {
+                if self.view.content.etymology {
+                    "full"
+                } else {
+                    "collapsed"
                 }
             }
             Action::Mouse => {
@@ -249,6 +305,9 @@ impl App {
             Action::Bottom => self.scroll = self.max_scroll,
             Action::Examples => self.view.expand_examples = !self.view.expand_examples,
             Action::Ipa => self.view.expand_ipa = !self.view.expand_ipa,
+            Action::Forms => self.view.content.forms = !self.view.content.forms,
+            Action::Relations => self.view.content.relations = !self.view.content.relations,
+            Action::Etymology => self.view.content.etymology = !self.view.content.etymology,
             Action::Back => self.back(),
             Action::Forward => self.forward(),
             Action::Settings => self.open_panel(Overlay::Appearance),

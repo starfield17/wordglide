@@ -1,5 +1,5 @@
-//! Schema-4 positional MessagePack entries and bounded independent Zstd frames.
-use crate::{Entry, Example, Group, Sense};
+//! Schema-5 positional MessagePack entries and bounded independent Zstd frames.
+use crate::{Entry, Example, Group, Pronunciation, RelationKind, Sense, TermRelation, WordForm};
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
 
@@ -7,7 +7,7 @@ pub(crate) const MAX_RAW: usize = 1024 * 1024;
 pub(crate) const MAX_COMPRESSED: usize = 2 * MAX_RAW;
 pub(crate) const MAX_DICTIONARY: usize = 64 * 1024;
 
-// The wire types freeze schema-4 field order independently of the public JSON types.
+// The wire types freeze schema-5 field order independently of the public JSON types.
 #[derive(Serialize, Deserialize)]
 struct WireEntry(
     String,
@@ -19,9 +19,73 @@ struct WireEntry(
     String,
 );
 #[derive(Serialize, Deserialize)]
-struct WireGroup(String, String, Vec<String>, Vec<WireSense>, Option<u32>);
+struct WireGroup(
+    String,
+    String,
+    Vec<WirePronunciation>,
+    Vec<WireSense>,
+    Option<u32>,
+    String,
+    Vec<WireForm>,
+    Vec<WireRelation>,
+);
 #[derive(Serialize, Deserialize)]
-struct WireSense(Vec<String>, Vec<String>, Vec<WireExample>, Vec<String>);
+struct WireForm(String, Vec<String>);
+#[derive(Serialize, Deserialize)]
+struct WirePronunciation(String, Vec<String>, String);
+#[derive(Serialize, Deserialize)]
+struct WireRelation(u8, String, Vec<String>, String, String);
+
+fn encode_relations(values: &[TermRelation]) -> Vec<WireRelation> {
+    values
+        .iter()
+        .map(|r| {
+            WireRelation(
+                match r.kind {
+                    RelationKind::Synonym => 0,
+                    RelationKind::Antonym => 1,
+                    RelationKind::Derived => 2,
+                    RelationKind::Related => 3,
+                },
+                r.word.clone(),
+                r.tags.clone(),
+                r.sense.clone(),
+                r.source.clone(),
+            )
+        })
+        .collect()
+}
+
+fn decode_relations(values: Vec<WireRelation>) -> Result<Vec<TermRelation>> {
+    values
+        .into_iter()
+        .map(|WireRelation(kind, word, tags, sense, source)| {
+            let kind = match kind {
+                0 => RelationKind::Synonym,
+                1 => RelationKind::Antonym,
+                2 => RelationKind::Derived,
+                3 => RelationKind::Related,
+                _ => bail!("Unknown source relation kind"),
+            };
+            ensure!(!word.trim().is_empty(), "Empty source relation");
+            Ok(TermRelation {
+                kind,
+                word,
+                tags,
+                sense,
+                source,
+            })
+        })
+        .collect()
+}
+#[derive(Serialize, Deserialize)]
+struct WireSense(
+    Vec<String>,
+    Vec<String>,
+    Vec<WireExample>,
+    Vec<String>,
+    Vec<WireRelation>,
+);
 #[derive(Serialize, Deserialize)]
 struct WireExample(String, String, String);
 
@@ -30,6 +94,31 @@ pub(crate) fn encode(entry: &Entry) -> Result<Vec<u8>> {
         serde_json::to_vec(entry)?.len() <= MAX_RAW,
         "Dictionary entry exceeds 1 MiB"
     );
+    for group in &entry.groups {
+        let mut projection = Vec::new();
+        for p in &group.pronunciations {
+            ensure!(!p.ipa.trim().is_empty(), "Empty pronunciation");
+            if !projection.contains(&p.ipa) {
+                projection.push(p.ipa.clone());
+            }
+        }
+        ensure!(
+            group.ipa == projection,
+            "IPA must match structured pronunciations"
+        );
+        ensure!(
+            group.forms.iter().all(|f| !f.form.trim().is_empty()),
+            "Empty word form"
+        );
+        ensure!(
+            group
+                .relations
+                .iter()
+                .chain(group.senses.iter().flat_map(|s| &s.relations))
+                .all(|r| !r.word.trim().is_empty()),
+            "Empty source relation"
+        );
+    }
     let groups = entry
         .groups
         .iter()
@@ -37,7 +126,10 @@ pub(crate) fn encode(entry: &Entry) -> Result<Vec<u8>> {
             WireGroup(
                 g.headword.clone(),
                 g.pos.clone(),
-                g.ipa.clone(),
+                g.pronunciations
+                    .iter()
+                    .map(|p| WirePronunciation(p.ipa.clone(), p.tags.clone(), p.note.clone()))
+                    .collect(),
                 g.senses
                     .iter()
                     .map(|s| {
@@ -51,10 +143,17 @@ pub(crate) fn encode(entry: &Entry) -> Result<Vec<u8>> {
                                 })
                                 .collect(),
                             s.targets.clone(),
+                            encode_relations(&s.relations),
                         )
                     })
                     .collect(),
                 g.etymology_number,
+                g.etymology_text.clone(),
+                g.forms
+                    .iter()
+                    .map(|f| WireForm(f.form.clone(), f.tags.clone()))
+                    .collect(),
+                encode_relations(&g.relations),
             )
         })
         .collect();
@@ -145,30 +244,70 @@ pub(crate) fn decode(key: &str, bytes: &[u8]) -> Result<Entry> {
         groups: groups
             .into_iter()
             .map(
-                |WireGroup(headword, pos, ipa, senses, etymology_number)| Group {
+                |WireGroup(
                     headword,
                     pos,
-                    ipa,
+                    sounds,
+                    senses,
                     etymology_number,
-                    senses: senses
+                    etymology_text,
+                    forms,
+                    relations,
+                )| {
+                    let pronunciations: Vec<_> = sounds
                         .into_iter()
-                        .map(|WireSense(glosses, tags, examples, targets)| Sense {
-                            glosses,
-                            tags,
-                            targets,
-                            examples: examples
-                                .into_iter()
-                                .map(|WireExample(text, reference, kind)| Example {
-                                    text,
-                                    reference,
-                                    kind,
+                        .map(|WirePronunciation(ipa, tags, note)| Pronunciation { ipa, tags, note })
+                        .collect();
+                    ensure!(
+                        pronunciations.iter().all(|p| !p.ipa.trim().is_empty()),
+                        "Empty pronunciation"
+                    );
+                    let mut ipa = Vec::new();
+                    for p in &pronunciations {
+                        if !ipa.contains(&p.ipa) {
+                            ipa.push(p.ipa.clone());
+                        }
+                    }
+                    let forms: Vec<_> = forms
+                        .into_iter()
+                        .map(|WireForm(form, tags)| WordForm { form, tags })
+                        .collect();
+                    ensure!(
+                        forms.iter().all(|f| !f.form.trim().is_empty()),
+                        "Empty word form"
+                    );
+                    Ok(Group {
+                        headword,
+                        pos,
+                        ipa,
+                        pronunciations,
+                        etymology_number,
+                        etymology_text,
+                        forms,
+                        relations: decode_relations(relations)?,
+                        senses: senses
+                            .into_iter()
+                            .map(|WireSense(glosses, tags, examples, targets, relations)| {
+                                Ok(Sense {
+                                    glosses,
+                                    tags,
+                                    targets,
+                                    relations: decode_relations(relations)?,
+                                    examples: examples
+                                        .into_iter()
+                                        .map(|WireExample(text, reference, kind)| Example {
+                                            text,
+                                            reference,
+                                            kind,
+                                        })
+                                        .collect(),
                                 })
-                                .collect(),
-                        })
-                        .collect(),
+                            })
+                            .collect::<Result<Vec<_>>>()?,
+                    })
                 },
             )
-            .collect(),
+            .collect::<Result<Vec<_>>>()?,
         lemmas,
         preview_lemmas,
         source_url,
@@ -226,8 +365,11 @@ mod tests {
     fn fixture() -> Entry {
         serde_json::from_value(
             serde_json::json!({"key":"café", "headword":"Café", "score":100,
-            "groups":[{"headword":"café", "pos":"noun", "ipa":["ipa"], "etymology_number":2,
-            "senses":[{"glosses":["source definition"], "tags":["archaic"], "targets":["coffee"],
+            "groups":[{"headword":"café", "pos":"noun", "ipa":["ipa"], "pronunciations":[{"ipa":"ipa","tags":["UK"],"note":"source note"}],
+            "etymology_number":2, "etymology_text":"source etymology\n漢字",
+            "forms":[{"form":"cafés","tags":["plural","nonstandard"]}],
+            "relations":[{"kind":"derived","word":"café noir","sense":"source qualifier","source":"Thesaurus:fixture"}],
+            "senses":[{"glosses":["source definition"], "tags":["archaic"], "targets":["coffee"], "relations":[{"kind":"synonym","word":"coffee","tags":["rare"],"sense":"source sense","source":"source"}],
             "examples":[{"text":"source example", "reference":"source", "kind":"quotation"}]}]}],
             "lemmas":["coffee"], "preview_lemmas":true, "source_url":"source"}),
         )
@@ -240,6 +382,16 @@ mod tests {
             serde_json::to_value(decode("café", &encode(&entry).unwrap()).unwrap()).unwrap(),
             serde_json::to_value(entry).unwrap()
         );
+    }
+    #[test]
+    fn structured_ipa_projection_and_relation_kinds_are_checked() {
+        let mut entry = fixture();
+        entry.groups[0].ipa.push("unrelated".into());
+        assert!(encode(&entry).is_err());
+        let bytes = encode(&fixture()).unwrap();
+        let mut wire: serde_json::Value = rmp_serde::from_slice(&bytes).unwrap();
+        wire[3][0][7][0][0] = 99.into();
+        assert!(decode("café", &rmp_serde::to_vec(&wire).unwrap()).is_err());
     }
     #[test]
     fn cache_counts_owned_short_strings_instead_of_wire_bytes() {

@@ -1,4 +1,4 @@
-//! Private schema-4 locator table and read-only, byte-bounded block cache.
+//! Private schema-5 locator table and read-only, byte-bounded block cache.
 use crate::{Entry, entry_codec};
 use anyhow::{Context, Result, ensure};
 use std::{
@@ -9,7 +9,7 @@ use std::{
     path::Path,
 };
 
-pub(crate) const MAGIC: &[u8; 8] = b"WGLENT04";
+pub(crate) const MAGIC: &[u8; 8] = b"WGLENT05";
 pub(crate) const HEADER: usize = 32;
 pub(crate) const BLOCK_RECORD: usize = 24;
 const LOCATION: usize = 8;

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0
+
+- Retain source word forms, per-sense and word-level term relations, etymology
+  text, and IPA dialect labels/notes. Reading v/r/t expands forms, relations and
+  etymology for the session; p keeps the saved pronunciation preference.
+- Follow source phrases as complete terms with keyboard hints or mouse, including
+  wrapped lines, and restore source positions across toggles and navigation.
+- Schema 5 replaces all older pack formats. Re-prepare from raw data; replace old
+  installed packs. Public Group/Sense literals require the new source fields;
+  Group.ipa is the projection of structured pronunciation records.
+- Document future Chinese–Chinese/Japanese–Japanese pack extension points; no
+  additional language or multi-dictionary support is introduced.
+- Program release remains gated on publishing and pinning the verified schema-5
+  dictionary asset.
+
 ## 0.4.3
 
 - Etymology branches: entries with multiple etymologies show `[Etym n]` in group
@@ -32,7 +47,7 @@
   structure before atomic activation. Corrupt frames, locators, dictionaries,
   malicious wire lengths, and damaged archive footers have regression coverage.
 - `dict-bench --queries FILE` supports reproducible paired query measurements;
-  PERFORMANCE.md records full-data sizes, latency, and validation limits.
+  [PERFORMANCE.md](doc/PERFORMANCE.md) records full-data sizes, latency, and validation limits.
 
 Schema 2/3 packs are rejected. After updating the program, download the new
 dictionary with F2 Settings or `wordglide --download-data`. Explicit `--data`

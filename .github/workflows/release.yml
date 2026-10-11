@@ -36,10 +36,10 @@ jobs:
           if os.environ['REF_TYPE'] == 'tag' and os.environ['REF_NAME'] != 'v' + version:
               raise SystemExit('Release tag must match Cargo.toml version')
           data = json.loads(Path('data-release.json').read_text())
-          if (data['schema_version'] != 4 or data['asset'] != 'english-pack.tar.xz'
+          if (data['schema_version'] != 5 or data['asset'] != 'english-pack.tar.xz'
                   or not re.fullmatch(r'[A-Za-z0-9._-]+', data['tag'])
                   or not re.fullmatch(r'[0-9a-f]{64}', data['sha256'])):
-              raise SystemExit('Release requires a published schema-4 english-pack.tar.xz. Publish and verify the new data asset, then update data-release.json with its real tag and checksum.')
+              raise SystemExit('Release requires a published schema-5 english-pack.tar.xz. Publish and verify the new data asset, then update data-release.json with its real tag and checksum.')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write('version=' + version + '\ndata_tag=' + data['tag'] + '\ndata_asset=' + data['asset'] + '\n')
           PY
@@ -132,6 +132,7 @@ jobs:
           python3 scripts/terminal_no_data_smoke.py --binary "$binary"
           python3 scripts/terminal_smoke.py --binary "$binary" --data data/ci-sample
           python3 scripts/terminal_interaction_smoke.py --binary "$binary" --data data/ci-sample
+          python3 scripts/terminal_content_smoke.py --binary "$binary" --data data/ci-sample
           python3 scripts/terminal_appearance_smoke.py --binary "$binary" --data data/ci-sample
       - name: Verify runtime dependencies
         shell: bash

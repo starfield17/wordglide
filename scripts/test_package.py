@@ -131,13 +131,13 @@ class PackagingTests(unittest.TestCase):
         self.assertNotIn("2026-09-02", notes)
         self.assertNotIn("1,355,084", notes)
 
-    def test_schema_four_archives_reject_old_or_missing_ranking(self):
+    def test_current_archives_reject_old_or_missing_ranking(self):
         from package import validate_data_archive
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / "data.tar.xz"
             for ranking in (OLD_POLICY, None):
                 files = {name: b"format fixture" for name in ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")}
-                manifest = {"schema_version":4, "candidate_count":1,
+                manifest = {"schema_version":5, "candidate_count":1,
                             "files":{name:hashlib.sha256(data).hexdigest() for name,data in files.items()},
                             "sizes":{name:len(data) for name,data in files.items()}}
                 if ranking is not None:
@@ -160,7 +160,7 @@ class PackagingTests(unittest.TestCase):
             pack.mkdir()
             for name in ("entries.bin", "entries.idx", "words.fst", "lexicon.bin"):
                 (pack / name).write_bytes(b"format fixture")
-            manifest = {"schema_version": 4, "ranking": POLICY, "candidate_count": 1,
+            manifest = {"schema_version": 5, "ranking": POLICY, "candidate_count": 1,
                         "sizes": {name: (pack / name).stat().st_size for name in
                                   ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")},
                         "files": {name: checksum(pack / name) for name in
@@ -219,7 +219,7 @@ class PackagingTests(unittest.TestCase):
         from package import validate_data_archive
         payload = b"format fixture"
         files = {name: payload for name in ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")}
-        files["manifest.json"] = json.dumps({"schema_version": 4, "ranking": POLICY, "candidate_count": 1,
+        files["manifest.json"] = json.dumps({"schema_version": 5, "ranking": POLICY, "candidate_count": 1,
             "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
             "sizes": {name: len(data) for name, data in files.items()}}).encode()
         files["THIRD_PARTY.md"] = b"attribution fixture"

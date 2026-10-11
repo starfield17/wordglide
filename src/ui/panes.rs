@@ -221,8 +221,8 @@ pub(super) fn render_definition(
     app.labels.clear();
     if app.picking {
         for line in &visible {
-            for token in line.text.split_word_bounds() {
-                let key = crate::normalize(token);
+            for (range, key) in line.lookup_spans() {
+                let token = &line.text[range];
                 if token.graphemes(true).take(2).count() == 2
                     && token.graphemes(true).take(2).all(|g| g.width() == 1)
                     && app.contains(&key)

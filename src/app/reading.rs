@@ -1,6 +1,22 @@
 //! Source-preserving reading document and navigation addresses, independent of graphics.
 use super::*;
+use crate::{RelationKind, TermRelation};
 use std::{ops::Range, sync::Arc};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Part {
+    Header,
+    Gloss,
+    Example(usize),
+    Reference(usize),
+    Blank,
+    Form(usize),
+    FormsSummary,
+    Etymology(usize),
+    EtymologySummary,
+    Relation(usize),
+    RelationsSummary(RelationKind),
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Node {
@@ -8,7 +24,7 @@ pub(crate) struct Node {
     group: usize,
     historical: bool,
     sense: Option<usize>,
-    part: usize,
+    part: Part,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +44,7 @@ pub(crate) enum TextRole {
 
 #[derive(Clone)]
 pub(crate) struct LogicalLine {
+    pub(crate) links: Vec<(Range<usize>, String)>,
     pub(crate) text: String,
     pub(crate) role: TextRole,
     pub(crate) secondary_start: Option<usize>,
@@ -38,6 +55,7 @@ pub(crate) struct LogicalLine {
 impl LogicalLine {
     fn new(text: String, role: TextRole, node: Node, section: Option<usize>) -> Self {
         Self {
+            links: Vec::new(),
             text: text
                 .chars()
                 .filter_map(|c| {
@@ -80,6 +98,7 @@ pub(crate) struct Match {
 
 #[derive(Default)]
 pub(crate) struct ReadingState {
+    pub(crate) content: ContentDisplay,
     pub(crate) lines: Vec<LogicalLine>,
     pub(crate) sections: Vec<Section>,
     pub(crate) rows: Vec<TextRow>,
@@ -124,7 +143,7 @@ impl ReadingState {
                         && line.node.group == anchor.node.group
                         && line.node.historical == anchor.node.historical
                         && line.node.sense == anchor.node.sense
-                        && line.node.part == 1
+                        && line.node.part == Part::Gloss
                 })
             })
             .or_else(|| {
@@ -204,6 +223,7 @@ impl ReadingState {
 pub(crate) fn document(
     preview: &Preview,
     preferences: ReadingPreferences,
+    content: ContentDisplay,
 ) -> (Vec<LogicalLine>, Vec<Section>) {
     let mut lines = Vec::new();
     let mut sections = Vec::new();
@@ -219,7 +239,7 @@ pub(crate) fn document(
             group: usize::MAX,
             historical: false,
             sense: None,
-            part: 0,
+            part: Part::Header,
         };
         lines.push(LogicalLine::new(
             format!("{} → {} (word form)", preview.entry.headword, names),
@@ -228,7 +248,7 @@ pub(crate) fn document(
             None,
         ));
         for entry in &preview.related {
-            append_entry(&mut lines, &mut sections, entry, true, preferences);
+            append_entry(&mut lines, &mut sections, entry, true, preferences, content);
         }
         lines.push(LogicalLine::new(
             format!("Original form: {}", preview.entry.headword),
@@ -243,6 +263,7 @@ pub(crate) fn document(
         &preview.entry,
         false,
         preferences,
+        content,
     );
     lines.push(LogicalLine::new(
         format!("Source: {}", preview.entry.source_url),
@@ -252,11 +273,92 @@ pub(crate) fn document(
             group: usize::MAX,
             historical: false,
             sense: None,
-            part: 1,
+            part: Part::Gloss,
         },
         None,
     ));
     (lines, sections)
+}
+
+fn tags(values: &[String]) -> String {
+    if values.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", values.join(", "))
+    }
+}
+
+fn link_term(line: &mut LogicalLine, term: &str, start: usize) {
+    let visible: String = term
+        .chars()
+        .filter_map(|c| {
+            if c == '\t' {
+                Some(' ')
+            } else if c == '\n' || !c.is_control() {
+                Some(c)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if !visible.is_empty() {
+        line.links
+            .push((start..start + visible.len(), normalize(term)));
+    }
+}
+
+fn append_relations(
+    lines: &mut Vec<LogicalLine>,
+    relations: &[TermRelation],
+    expanded: bool,
+    sense: Option<usize>,
+    section: usize,
+    node: &impl Fn(Option<usize>, Part) -> Node,
+) {
+    for (kind, title) in [
+        (RelationKind::Synonym, "Synonyms"),
+        (RelationKind::Antonym, "Antonyms"),
+        (RelationKind::Derived, "Derived terms"),
+        (RelationKind::Related, "Related terms"),
+    ] {
+        let items: Vec<_> = relations
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.kind == kind)
+            .collect();
+        for (i, relation) in items.iter().take(if expanded { usize::MAX } else { 4 }) {
+            let qualifier = if relation.sense.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", relation.sense)
+            };
+            let source = if relation.source.is_empty() {
+                String::new()
+            } else {
+                format!(" (source: {})", relation.source)
+            };
+            let mut line = LogicalLine::new(
+                format!(
+                    "   {title}: {}{}{qualifier}{source}",
+                    relation.word,
+                    tags(&relation.tags)
+                ),
+                TextRole::Dim,
+                node(sense, Part::Relation(*i)),
+                Some(section),
+            );
+            link_term(&mut line, &relation.word, format!("   {title}: ").len());
+            lines.push(line);
+        }
+        if !expanded && items.len() > 4 {
+            lines.push(LogicalLine::new(
+                format!("   +{} {title} · r expands", items.len() - 4),
+                TextRole::Dim,
+                node(sense, Part::RelationsSummary(kind)),
+                Some(section),
+            ));
+        }
+    }
 }
 
 fn append_entry(
@@ -265,6 +367,7 @@ fn append_entry(
     entry: &crate::Entry,
     related: bool,
     preferences: ReadingPreferences,
+    content: ContentDisplay,
 ) {
     if related {
         lines.push(LogicalLine::new(
@@ -275,7 +378,7 @@ fn append_entry(
                 group: usize::MAX,
                 historical: false,
                 sense: None,
-                part: 2,
+                part: Part::Blank,
             },
             None,
         ));
@@ -311,10 +414,32 @@ fn append_entry(
                 title,
                 line: lines.len(),
             });
-            let ipa = if !preferences.expand_ipa && group.ipa.len() > 2 {
-                format!("{} …", group.ipa[..2].join(" · "))
+            let ipa = group
+                .pronunciations
+                .iter()
+                .take(if preferences.expand_ipa {
+                    usize::MAX
+                } else {
+                    2
+                })
+                .map(|p| {
+                    format!(
+                        "{}{}{}",
+                        p.ipa,
+                        tags(&p.tags),
+                        if p.note.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({})", p.note)
+                        }
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" · ");
+            let ipa = if !preferences.expand_ipa && group.pronunciations.len() > 2 {
+                format!("{ipa} …")
             } else {
-                group.ipa.join(" · ")
+                ipa
             };
             let node = |sense, part| Node {
                 entry: entry.key.clone(),
@@ -341,11 +466,67 @@ fn append_entry(
                     }
                 ),
                 TextRole::Heading,
-                node(None, 0),
+                node(None, Part::Header),
                 Some(section),
             );
             header.secondary_start = Some(group.headword.len());
             lines.push(header);
+            // Group-level source content occurs once, even when its senses span
+            // modern and historical reading sections.
+            let first_partition = !historical || group.senses.iter().all(|s| s.historical());
+            if first_partition {
+                for (i, form) in
+                    group
+                        .forms
+                        .iter()
+                        .enumerate()
+                        .take(if content.forms { usize::MAX } else { 4 })
+                {
+                    let mut line = LogicalLine::new(
+                        format!("   Form: {}{}", form.form, tags(&form.tags)),
+                        TextRole::Dim,
+                        node(None, Part::Form(i)),
+                        Some(section),
+                    );
+                    link_term(&mut line, &form.form, "   Form: ".len());
+                    lines.push(line);
+                }
+                if !content.forms && group.forms.len() > 4 {
+                    lines.push(LogicalLine::new(
+                        format!("   +{} forms · v expands", group.forms.len() - 4),
+                        TextRole::Dim,
+                        node(None, Part::FormsSummary),
+                        Some(section),
+                    ));
+                }
+                if !group.etymology_text.is_empty() {
+                    if content.etymology {
+                        for (i, text) in group.etymology_text.lines().enumerate() {
+                            lines.push(LogicalLine::new(
+                                format!("   Etymology: {text}"),
+                                TextRole::Dim,
+                                node(None, Part::Etymology(i)),
+                                Some(section),
+                            ));
+                        }
+                    } else {
+                        lines.push(LogicalLine::new(
+                            "   Etymology · t expands".into(),
+                            TextRole::Dim,
+                            node(None, Part::EtymologySummary),
+                            Some(section),
+                        ));
+                    }
+                }
+                append_relations(
+                    lines,
+                    &group.relations,
+                    content.relations,
+                    None,
+                    section,
+                    &node,
+                );
+            }
             for (number, (index, sense)) in senses.iter().enumerate() {
                 let tags = if sense.tags.is_empty() {
                     String::new()
@@ -355,9 +536,17 @@ fn append_entry(
                 lines.push(LogicalLine::new(
                     format!("{}. {}{}", number + 1, sense.glosses.join(" › "), tags),
                     TextRole::Body,
-                    node(Some(*index), 1),
+                    node(Some(*index), Part::Gloss),
                     Some(section),
                 ));
+                append_relations(
+                    lines,
+                    &sense.relations,
+                    content.relations,
+                    Some(*index),
+                    section,
+                    &node,
+                );
                 for (ei, example) in sense
                     .examples
                     .iter()
@@ -371,14 +560,14 @@ fn append_entry(
                     lines.push(LogicalLine::new(
                         format!("   • {}", example.text),
                         TextRole::Example,
-                        node(Some(*index), 2 + 2 * ei),
+                        node(Some(*index), Part::Example(ei)),
                         Some(section),
                     ));
                     if preferences.expand_examples && !example.reference.is_empty() {
                         lines.push(LogicalLine::new(
                             format!("     — {}", example.reference),
                             TextRole::Dim,
-                            node(Some(*index), 3 + 2 * ei),
+                            node(Some(*index), Part::Reference(ei)),
                             Some(section),
                         ));
                     }
@@ -386,7 +575,7 @@ fn append_entry(
                 lines.push(LogicalLine::new(
                     String::new(),
                     TextRole::Body,
-                    node(Some(*index), usize::MAX),
+                    node(Some(*index), Part::Blank),
                     Some(section),
                 ));
             }
@@ -501,6 +690,48 @@ impl App {
             } else {
                 self.forward();
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod content_tests {
+    use super::*;
+
+    #[test]
+    fn source_term_links_skip_category_labels_and_keep_whitespace_addresses() {
+        let entry: crate::Entry = serde_json::from_value(serde_json::json!({
+            "key":"test", "headword":"test", "score":0, "source_url":"source",
+            "groups":[{"headword":"test","pos":"noun",
+                "forms":[{"form":"Form"}],
+                "relations":[{"kind":"synonym","word":"Synonyms"},
+                    {"kind":"related","word":"take\toff\nagain"}],
+                "senses":[{"glosses":["source gloss"]}]}]
+        }))
+        .unwrap();
+        let preview = Preview {
+            entry: Arc::new(entry),
+            related: vec![],
+        };
+        let (lines, _) = document(
+            &preview,
+            ReadingPreferences::default(),
+            ContentDisplay::default(),
+        );
+        for (prefix, visible, target) in [
+            ("   Form: ", "Form", "form"),
+            ("   Synonyms: ", "Synonyms", "synonyms"),
+            ("   Related terms: ", "take off\nagain", "take off again"),
+        ] {
+            let line = lines
+                .iter()
+                .find(|line| line.text.starts_with(prefix))
+                .unwrap();
+            assert_eq!(
+                line.links,
+                vec![(prefix.len()..prefix.len() + visible.len(), target.into())]
+            );
+            assert_eq!(&line.text[line.links[0].0.clone()], visible);
         }
     }
 }

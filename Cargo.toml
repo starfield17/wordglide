@@ -1,6 +1,6 @@
 [package]
 name = "wordglide"
-version = "0.4.3"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -16,7 +16,8 @@ include = [
     "/Cargo.toml", "/Cargo.lock", "/src/**/*.rs", "/tests/**/*.rs",
     "/tests/fixtures/*.json",
     "/examples/sample/*.json", "/examples/sample/*.jsonl",
-    "/README.md", "/LICENSE", "/THIRD_PARTY.md", "/CHANGELOG.md", "/PERFORMANCE.md",
+    "/README.md", "/LICENSE", "/THIRD_PARTY.md", "/CHANGELOG.md",
+    "/SPEC.md", "/AGENTS.md", "/doc/*.md",
 ]
 
 [dependencies]

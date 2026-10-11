@@ -30,7 +30,10 @@ mod ui;
 pub use app::{App, Focus, ReadingLayout, ReadingPreferences};
 pub use build::build_pack;
 pub use download::downloaded_data_path;
-pub use model::{Candidate, Entry, Example, Group, MatchKind, Preview, Sense};
+pub use model::{
+    Candidate, Entry, Example, Group, MatchKind, Preview, Pronunciation, RelationKind, Sense,
+    TermRelation, WordForm,
+};
 pub use normalize::normalize;
 pub use store::{Dictionary, PackInfo, pack_info, verify_pack};
 pub use theme::{Appearance, AppearanceOverrides, ThemePreset};

@@ -53,6 +53,176 @@ fn stroke(app: &mut App, code: KeyCode) {
 }
 
 #[test]
+fn rich_content_toggles_keep_source_sense_and_fold_to_its_parent() {
+    let (_dir, dictionary) = dictionary();
+    let mut app = App::new(dictionary, "take");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let gloss = app
+        .reading
+        .lines
+        .iter()
+        .position(|l| l.text.starts_with("1. To get into"))
+        .unwrap();
+    app.scroll = app
+        .reading
+        .rows
+        .iter()
+        .position(|r| r.logical == gloss)
+        .unwrap();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let sense = app.reading.lines[app.reading.rows[app.scroll].logical]
+        .text
+        .clone();
+    let before = app.reading_preferences();
+    for key in ['v', 'r', 't'] {
+        stroke(&mut app, KeyCode::Char(key));
+        paint(&mut app, &mut terminal, &mut pointer);
+        assert_eq!(
+            app.reading.lines[app.reading.rows[app.scroll].logical].text,
+            sense
+        );
+    }
+    assert_eq!(
+        app.reading_preferences(),
+        before,
+        "content toggles must not become saved preferences"
+    );
+    assert!(
+        app.reading
+            .lines
+            .iter()
+            .any(|l| l.text.contains("Etymology: From Middle English"))
+    );
+    assert!(
+        app.reading
+            .lines
+            .iter()
+            .any(|l| l.text.contains("Synonyms: seize"))
+    );
+    assert!(
+        app.reading
+            .lines
+            .iter()
+            .any(|l| l.text.contains("Derived terms: take off"))
+    );
+    let logical = app
+        .reading
+        .lines
+        .iter()
+        .position(|l| l.text.starts_with("   Etymology: "))
+        .unwrap();
+    app.scroll = app
+        .reading
+        .rows
+        .iter()
+        .position(|r| r.logical == logical)
+        .unwrap();
+    paint(&mut app, &mut terminal, &mut pointer);
+    stroke(&mut app, KeyCode::Char('t'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(
+        app.reading.lines[app.reading.rows[app.scroll].logical]
+            .text
+            .starts_with("take  verb")
+    );
+    // Full source content remains bounded by terminal display columns on reflow.
+    app.view.content.etymology = true;
+    let mut narrow = Terminal::new(TestBackend::new(30, 12)).unwrap();
+    paint(&mut app, &mut narrow, &mut pointer);
+    use unicode_width::UnicodeWidthStr;
+    assert!(
+        app.reading
+            .rows
+            .iter()
+            .all(|r| r.text.width() <= app.reading.width)
+    );
+}
+
+#[test]
+fn source_phrases_follow_as_whole_terms_with_mouse_and_keyboard_and_restore() {
+    let (_dir, dictionary) = dictionary();
+    let mut app = App::new(dictionary, "take");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    app.view.content.relations = true;
+    let mut terminal = Terminal::new(TestBackend::new(60, 24)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let logical = app
+        .reading
+        .lines
+        .iter()
+        .position(|l| l.links.iter().any(|(_, target)| target == "take off"))
+        .unwrap();
+    app.scroll = app
+        .reading
+        .rows
+        .iter()
+        .position(|r| r.logical == logical)
+        .unwrap();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let original = app.reading.lines[app.reading.rows[app.scroll].logical]
+        .text
+        .clone();
+    let (x, y) = pointer
+        .word_position("take off")
+        .expect("whole phrase mouse target");
+    assert!(on_mouse(&mut app, &pointer, click(x, y)));
+    settle(&mut app);
+    assert_eq!(app.input, "take off");
+    app.handle_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert_eq!(app.input, "take");
+    assert_eq!(
+        app.reading.lines[app.reading.rows[app.scroll].logical].text,
+        original
+    );
+    stroke(&mut app, KeyCode::Char('f'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    let label = app
+        .labels
+        .iter()
+        .find(|(_, target)| target == "take off")
+        .unwrap()
+        .0
+        .clone();
+    for ch in label.chars() {
+        stroke(&mut app, KeyCode::Char(ch));
+    }
+    settle(&mut app);
+    assert_eq!(app.input, "take off");
+}
+
+#[test]
+fn linked_long_terms_keep_targets_when_wrapped_and_do_not_link_category_labels() {
+    let text = "   Synonyms: Synonyms unusual-long-term";
+    let start = "   Synonyms: ".len();
+    let lines = wrap(
+        vec![ReadingLine {
+            text: text.into(),
+            style: Style::default(),
+            styles: vec![],
+            links: vec![(start..text.len(), "synonyms unusual-long-term".into())],
+        }],
+        18,
+    );
+    assert!(lines.len() > 2);
+    assert!(
+        lines[0].links.is_empty(),
+        "category label is not part of the source term"
+    );
+    assert!(lines.iter().skip(1).all(|l| {
+        l.links
+            .iter()
+            .any(|(_, target)| target == "synonyms unusual-long-term")
+    }));
+}
+
+#[test]
 fn settings_download_is_a_modal_command_and_preserves_preferences_and_lookup() {
     let (_dir, dictionary) = dictionary();
     let mut app = App::new(dictionary, "fist");
@@ -100,6 +270,7 @@ fn settings_download_is_a_modal_command_and_preserves_preferences_and_lookup() {
 fn hard_line_breaks_and_source_controls() {
     let lines = wrap(
         vec![ReadingLine {
+            links: Vec::new(),
             text: "first\nsecond\n\u{1b}[31mthird".into(),
             style: Style::default(),
             styles: Vec::new(),
@@ -141,6 +312,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
         // A long "1. ..." sense wraps with every continuation prefix equal to 3 spaces
         let sense_lines = wrap(
             vec![ReadingLine {
+                links: Vec::new(),
                 text: long_sense.into(),
                 style: Style::default(),
                 styles: Vec::new(),
@@ -160,6 +332,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
         // A long "   • ..." example wraps with every continuation prefix equal to 5 spaces
         let example_lines = wrap(
             vec![ReadingLine {
+                links: Vec::new(),
                 text: long_example.into(),
                 style: Style::default(),
                 styles: Vec::new(),
@@ -182,6 +355,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
         // A long "     — ..." reference wraps with every continuation prefix equal to 7 spaces
         let ref_lines = wrap(
             vec![ReadingLine {
+                links: Vec::new(),
                 text: long_reference.into(),
                 style: Style::default(),
                 styles: Vec::new(),
@@ -201,6 +375,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
         // A wrapped heading and a wrapped "Source: ..." line have no indent
         let heading_lines = wrap(
             vec![ReadingLine {
+                links: Vec::new(),
                 text: long_heading.into(),
                 style: Style::default(),
                 styles: Vec::new(),
@@ -221,6 +396,7 @@ fn wrapped_definition_lines_hanging_indents_and_display_widths() {
 
         let source_lines = wrap(
             vec![ReadingLine {
+                links: Vec::new(),
                 text: long_source.into(),
                 style: Style::default(),
                 styles: Vec::new(),
@@ -792,7 +968,10 @@ fn collapsible_ipa_water() {
         );
     }
     assert_eq!(heading.text.matches(" · ").count(), 1);
-    assert_eq!(expanded_heading.text.matches(" · ").count(), 33);
+    assert_eq!(
+        expanded_heading.text.matches(" · ").count(),
+        group_with_34.pronunciations.len() - 1
+    );
     assert!(!expanded_heading.text.ends_with('…'));
 
     // Toggle via key 'p' in definition focus
@@ -1108,6 +1287,7 @@ fn empty_state_explains_short_queries_and_spelling() {
 #[test]
 fn stale_style_adds_dim_without_dropping_colour() {
     let styled = ReadingLine {
+        links: Vec::new(),
         text: "house".into(),
         style: Style::default().fg(ratatui::style::Color::Cyan),
         styles: Vec::new(),

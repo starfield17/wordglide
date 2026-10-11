@@ -16,7 +16,8 @@ from prepare import POLICY
 DATA_FILES = ("entries.bin", "entries.idx", "words.fst", "lexicon.bin")
 DATA_MEMBERS = {"english-pack/" + name for name in
                 ("manifest.json", *DATA_FILES, "THIRD_PARTY.md")}
-DOCS = ("README.md", "LICENSE", "THIRD_PARTY.md", "PERFORMANCE.md")
+DOCS = ("README.md", "LICENSE", "THIRD_PARTY.md", "CHANGELOG.md", "SPEC.md", "AGENTS.md",
+        "doc/USAGE.md", "doc/PACK_AUTHORING.md", "doc/DEVELOPMENT.md", "doc/PERFORMANCE.md")
 
 
 class XzStream:
@@ -104,7 +105,7 @@ def _validate_data_stream(stream):
                 hashes[name] = h.hexdigest()
     while stream.read(1024 * 1024):
         pass
-    if (seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 4
+    if (seen != DATA_MEMBERS or not manifest or manifest.get("schema_version") != 5
             or manifest.get("ranking") != POLICY):
         raise ValueError("Incomplete data archive or unsupported schema")
     if manifest.get("candidate_count", 0) <= 0:
@@ -205,7 +206,7 @@ def main():
         raise ValueError("Build the Wordglide release executable first")
     if args.pack:
         manifest = json.loads((args.pack / "manifest.json").read_text())
-        if manifest.get("schema_version") != 4 or manifest.get("ranking") != POLICY:
+        if manifest.get("schema_version") != 5 or manifest.get("ranking") != POLICY:
             raise ValueError("Unsupported pack schema or ranking")
         for name in DATA_FILES:
             if checksum(args.pack / name) != manifest["files"][name]:

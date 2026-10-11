@@ -72,6 +72,41 @@ def rerank_prepared(args):
     print(f"Re-ranked {count:,} entries; source content and frequency baseline retained", flush=True)
 
 
+def source_tags(value):
+    if not isinstance(value, list) or not all(isinstance(t, str) for t in value):
+        raise ValueError("Invalid source tags")
+    return list(dict.fromkeys(value))
+
+
+def source_text(record, field):
+    value = record.get(field, "")
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid source {field}")
+    return value
+
+
+def relations(record, kinds=("synonyms", "antonyms", "derived", "related")):
+    result = []
+    for field in kinds:
+        values = record.get(field, [])
+        if not isinstance(values, list):
+            raise ValueError(f"Invalid source {field}")
+        for value in values:
+            if not isinstance(value, dict):
+                raise ValueError(f"Invalid source {field} item")
+            word = source_text(value, "word")
+            if not word.strip():
+                continue
+            item = {"kind": {"synonyms": "synonym", "antonyms": "antonym",
+                             "derived": "derived", "related": "related"}[field],
+                    "word": word, "tags": source_tags(value.get("tags", [])),
+                    "sense": source_text(value, "sense"),
+                    "source": source_text(value, "source")}
+            if item not in result:
+                result.append(item)
+    return result
+
+
 def extract(raw):
     if raw.get("lang_code") != "en":
         return None
@@ -81,7 +116,7 @@ def extract(raw):
     if not isinstance(raw.get("pos"), str) or not raw["pos"]:
         raise ValueError(f"English record has no valid part of speech: {word}")
     senses = []
-    inherited = raw.get("tags", [])
+    inherited = source_tags(raw.get("tags", []))
     for s in raw.get("senses", []):
         glosses = s.get("glosses", [])
         if not glosses:
@@ -93,8 +128,9 @@ def extract(raw):
                     for e in s.get("examples", []) if isinstance(e.get("text"), str)]
         examples.sort(key=lambda e: e["kind"] == "quotation")
         senses.append({"glosses": glosses,
-                       "tags": list(dict.fromkeys(inherited + s.get("tags", []))),
+                       "tags": list(dict.fromkeys(inherited + source_tags(s.get("tags", [])))),
                        "examples": examples[:2],
+                       "relations": relations(s, ("synonyms", "antonyms")),
                        "targets": list(dict.fromkeys(normalize(t["word"])
                            for t in s.get("form_of", []) if isinstance(t.get("word"), str)))})
     if not senses:
@@ -107,9 +143,24 @@ def extract(raw):
         etymology = int(etymology)
         if not 0 <= etymology <= 2**32 - 1:
             raise ValueError(f"etymology_number out of range for {word}")
+    pronunciations = []
+    for sound in raw.get("sounds", []):
+        if isinstance(sound.get("ipa"), str) and sound["ipa"].strip():
+            item = {"ipa": sound["ipa"], "tags": source_tags(sound.get("tags", [])),
+                    "note": source_text(sound, "note")}
+            if item not in pronunciations:
+                pronunciations.append(item)
+    word_forms = []
+    for form in raw.get("forms", []):
+        if isinstance(form.get("form"), str) and form["form"].strip():
+            item = {"form": form["form"], "tags": source_tags(form.get("tags", []))}
+            if item not in word_forms:
+                word_forms.append(item)
     group = {"headword": word, "pos": raw.get("pos", "unknown"),
-             "ipa": list(dict.fromkeys(s["ipa"] for s in raw.get("sounds", [])
-                        if isinstance(s.get("ipa"), str))),
+             "ipa": list(dict.fromkeys(p["ipa"] for p in pronunciations)),
+             "pronunciations": pronunciations, "forms": word_forms,
+             "etymology_text": source_text(raw, "etymology_text"),
+             "relations": relations(raw),
              "etymology_number": etymology, "senses": senses}
     forms = []
     # A historical-only source group cannot supply modern inverse links, even
@@ -178,7 +229,10 @@ def prepare(args):
     report = {"entries": 0, "groups": retained, "raw_records": processed,
               "rejected_records": rejected, "rejection_samples": rejection_samples,
               "senses": 0, "senses_with_examples": 0,
-              "senses_with_ipa": 0, "unresolved_form_targets": 0, "samples": {}}
+              "senses_with_ipa": 0, "unresolved_form_targets": 0, "samples": {},
+              "groups_with_etymology": 0, "groups_with_forms": 0,
+              "groups_with_relations": 0, "pronunciations_with_labels": 0,
+              "senses_with_relations": 0}
     pending_key = None
     pending_groups = []
     sample_words = {"fist", "bubble", "take", "set", "went", "better", "house", "take off"}
@@ -218,6 +272,12 @@ def prepare(args):
         report["senses"] += len(senses)
         report["senses_with_examples"] += sum(bool(s["examples"]) for s in senses)
         report["senses_with_ipa"] += sum(len(g["senses"]) for g in groups if g["ipa"])
+        for field in ("etymology", "forms", "relations"):
+            key_field = "etymology_text" if field == "etymology" else field
+            report["groups_with_" + field] += sum(bool(g[key_field]) for g in groups)
+        report["pronunciations_with_labels"] += sum(bool(p["tags"] or p["note"])
+            for g in groups for p in g["pronunciations"])
+        report["senses_with_relations"] += sum(bool(s["relations"]) for s in senses)
         if key in sample_words:
             report["samples"][key] = {"senses": len(senses), "lemmas": valid,
                 "first_gloss": senses[0]["glosses"],
@@ -242,7 +302,7 @@ def prepare(args):
             notices[str(file)] = distribution.locate_file(file).read_text()
     if not notices:
         raise ValueError("Installed wordfreq distribution is missing its license/notice files")
-    provenance = {"source": "English Wiktionary via raw Wiktextract/Kaikki",
+    provenance = {"source": "English Wiktionary via raw Wiktextract/Kaikki", "language_code": "en",
         "source_url": args.source_url, "snapshot": args.snapshot,
         "input_sha256": sha256(Path(args.input)), "ranking": POLICY, "quality_report": report,
         "wordfreq_version": distribution.version, "wordfreq_notices": notices,

@@ -13,6 +13,7 @@ use unicode_width::UnicodeWidthStr;
 
 #[derive(Clone)]
 pub(super) struct ReadingLine {
+    pub(super) links: Vec<(Range<usize>, String)>,
     pub(super) text: String,
     pub(super) style: Style,
     pub(super) styles: Vec<(Range<usize>, Style)>,
@@ -21,6 +22,7 @@ pub(super) struct ReadingLine {
 impl ReadingLine {
     pub(super) fn new(text: String, style: Style) -> Self {
         Self {
+            links: Vec::new(),
             text,
             style,
             styles: Vec::new(),
@@ -50,9 +52,51 @@ impl ReadingLine {
     }
 
     fn push_from(&mut self, source: &Self, range: Range<usize>) {
+        let output_start = self.text.len();
         for (offset, grapheme) in source.text[range.clone()].grapheme_indices(true) {
             self.push(grapheme, source.style_at(range.start + offset));
         }
+        for (link, target) in &source.links {
+            let start = link.start.max(range.start);
+            let end = link.end.min(range.end);
+            if start < end {
+                self.add_link(
+                    output_start + start - range.start..output_start + end - range.start,
+                    target,
+                );
+            }
+        }
+    }
+
+    fn add_link(&mut self, range: Range<usize>, target: &str) {
+        if let Some((previous, key)) = self.links.last_mut()
+            && previous.end == range.start
+            && key == target
+        {
+            previous.end = range.end;
+        } else {
+            self.links.push((range, target.into()));
+        }
+    }
+
+    /// Explicit source terms override tokenization, including wrapped phrases.
+    pub(super) fn lookup_spans(&self) -> Vec<(Range<usize>, String)> {
+        let mut result = self.links.clone();
+        let mut offset = 0;
+        for token in self.text.split_word_bounds() {
+            let range = offset..offset + token.len();
+            offset = range.end;
+            if token.chars().any(char::is_alphanumeric)
+                && !self
+                    .links
+                    .iter()
+                    .any(|(link, _)| link.start < range.end && range.start < link.end)
+            {
+                result.push((range, crate::normalize(token)));
+            }
+        }
+        result.sort_by_key(|(range, _)| range.start);
+        result
     }
 
     fn spans(&self, range: Range<usize>) -> Vec<Span<'static>> {
@@ -93,6 +137,7 @@ fn logical_line(source: &LogicalLine, theme: Theme) -> ReadingLine {
         TextRole::Accent => theme.accent(),
     };
     let mut line = ReadingLine::new(source.text.clone(), style);
+    line.links = source.links.clone();
     if let Some(start) = source.secondary_start {
         line.styles.push((start..line.text.len(), theme.dim()));
     }
@@ -114,6 +159,7 @@ pub(super) fn prepare_reading(app: &mut App, width: usize) {
     let preferences = app.reading_preferences();
     let same = app.reading.same_preview(preview);
     let rebuild = !same
+        || app.view.content != app.reading.content
         || preferences.expand_examples != app.reading.preferences.expand_examples
         || preferences.expand_ipa != app.reading.preferences.expand_ipa;
     let reflow = rebuild || app.reading.width != width;
@@ -133,11 +179,12 @@ pub(super) fn prepare_reading(app: &mut App, width: usize) {
             }
         });
     if rebuild {
-        let (lines, sections) = document(preview, preferences);
+        let (lines, sections) = document(preview, preferences, app.view.content);
         app.reading.lines = lines;
         app.reading.sections = sections;
         app.reading.preview = Some(preview.clone());
         app.reading.preferences = preferences;
+        app.reading.content = app.view.content;
         app.reading.update_matches();
     }
     if reflow {
@@ -195,6 +242,18 @@ pub(super) fn styled_rows(app: &App, range: Range<usize>) -> Vec<ReadingLine> {
                 TextRole::Accent => app.theme.accent(),
             };
             let mut line = ReadingLine::new(row.text.clone(), style);
+            for (link, target) in &source.links {
+                let start = link.start.max(row.start);
+                let end = link
+                    .end
+                    .min(row.start + row.text.len().saturating_sub(row.prefix));
+                if start < end {
+                    line.add_link(
+                        row.prefix + start - row.start..row.prefix + end - row.start,
+                        target,
+                    );
+                }
+            }
             if let Some(start) = source.secondary_start {
                 let end = row.start + row.text.len().saturating_sub(row.prefix);
                 if start < end {
@@ -272,6 +331,7 @@ pub(super) fn reading_lines(app: &App) -> Vec<ReadingLine> {
     let mut lines = vec![];
     if let Some(error) = &app.error {
         lines.push(ReadingLine {
+            links: Vec::new(),
             text: error.clone(),
             style: app.theme.error(),
             styles: Vec::new(),
@@ -280,6 +340,7 @@ pub(super) fn reading_lines(app: &App) -> Vec<ReadingLine> {
     let Some(preview) = &app.preview else {
         if lines.is_empty() {
             lines.push(ReadingLine {
+                links: Vec::new(),
                 text: empty_state(app),
                 style: app.theme.dim(),
                 styles: Vec::new(),
@@ -288,7 +349,7 @@ pub(super) fn reading_lines(app: &App) -> Vec<ReadingLine> {
         return lines;
     };
     lines.extend(
-        document(preview, app.reading_preferences())
+        document(preview, app.reading_preferences(), app.view.content)
             .0
             .iter()
             .map(|source| logical_line(source, app.theme)),
@@ -335,7 +396,11 @@ pub(super) fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
             } else if ch == '\t' {
                 line.push(" ", source.style_at(offset));
             } else if !ch.is_control() {
+                let start = line.text.len();
                 line.push(&ch.to_string(), source.style_at(offset));
+                if let Some((_, target)) = source.links.iter().find(|(r, _)| r.contains(&offset)) {
+                    line.add_link(start..line.text.len(), target);
+                }
             }
         }
         normalized.push(line);
@@ -382,7 +447,7 @@ pub(super) fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
                         current = ReadingLine::new(indent_str.clone(), line.style);
                         columns = indent;
                     }
-                    current.push(grapheme, line.style_at(start + byte));
+                    current.push_from(&line, start + byte..start + byte + grapheme.len());
                     columns += gn;
                 }
             }
@@ -402,20 +467,22 @@ pub(super) fn label_line(
 ) -> Line<'static> {
     let mut spans = vec![];
     let mut offset = 0;
-    for token in line.text.split_word_bounds() {
-        let start = offset;
-        offset += token.len();
-        if let Some(label) = map.get(&crate::normalize(token)) {
+    for (range, target) in line.lookup_spans() {
+        spans.extend(line.spans(offset..range.start));
+        let token = &line.text[range.clone()];
+        if let Some(label) = map.get(&target) {
             // Replace the first two display columns with the hint (single-letter words use one).
             let graphemes: Vec<_> = token.graphemes(true).collect();
             let count = graphemes.len().min(2);
             let hint = label.chars().take(count).collect::<String>();
             spans.push(Span::styled(hint, theme.hint_label()));
             let replaced_bytes: usize = graphemes[..count].iter().map(|g| g.len()).sum();
-            spans.extend(line.spans(start + replaced_bytes..offset));
+            spans.extend(line.spans(range.start + replaced_bytes..range.end));
         } else {
-            spans.extend(line.spans(start..offset));
+            spans.extend(line.spans(range.clone()));
         }
+        offset = range.end;
     }
+    spans.extend(line.spans(offset..line.text.len()));
     Line::from(spans)
 }

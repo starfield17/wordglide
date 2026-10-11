@@ -53,6 +53,8 @@ fn help_lines(theme: Theme, focus: Focus) -> Vec<Line<'static>> {
         body("  Space or Alt+P quick peek candidate definition card"),
         body("  f follow a visible word (type the two hint letters)"),
         body("  e examples and references: compact / full"),
+        body("  v word forms: compact / full · r term relations: compact / full"),
+        body("  t etymology text: collapsed / full (session only)"),
         body("  p pronunciation (IPA): short / full"),
         body("  Ctrl+J/K scroll one line · [/] previous/next group"),
         body("  / find text · n/N next/previous match · o outline · F4 reading focus"),

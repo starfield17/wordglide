@@ -75,9 +75,11 @@ fn corrupt_or_incompatible_packs_are_rejected() {
     let path = dir.path().join("pack/manifest.json");
     let mut manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    manifest["schema_version"] = 999.into();
-    fs::write(&path, manifest.to_string()).unwrap();
-    assert!(Dictionary::open(&dir.path().join("pack")).is_err());
+    for schema in [2, 3, 4, 999] {
+        manifest["schema_version"] = schema.into();
+        fs::write(&path, manifest.to_string()).unwrap();
+        assert!(Dictionary::open(&dir.path().join("pack")).is_err());
+    }
 }
 
 #[test]
@@ -117,7 +119,7 @@ fn lightweight_open_and_explicit_verification_are_separate() {
     let file = path.join("manifest.json");
     let mut manifest: serde_json::Value =
         serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
-    assert_eq!(manifest["schema_version"], 4);
+    assert_eq!(manifest["schema_version"], 5);
     manifest["files"]["entries.bin"] = "0".repeat(64).into();
     fs::write(file, manifest.to_string()).unwrap();
     assert!(
@@ -248,7 +250,7 @@ fn pack_info_reports_metadata_and_verify_counts_entries() {
     .unwrap();
 
     let info = wordglide::pack_info(&out).unwrap();
-    assert_eq!(info.schema_version, 4);
+    assert_eq!(info.schema_version, 5);
     assert_eq!(info.candidate_count, 89);
     assert_eq!(info.snapshot, "2026-09-02-sampled-2026-10-06");
     assert!(info.source.contains("Wiktionary"));
