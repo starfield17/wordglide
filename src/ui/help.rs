@@ -46,17 +46,17 @@ fn help_lines(theme: Theme, focus: Focus) -> Vec<Line<'static>> {
     let mut lines = vec![
         heading("Lookup"),
         body("  Type to search · Enter accept and read · Ctrl+L switch focus"),
-        body("  ↑/↓ or Ctrl+P/N select · Alt+P quick peek card"),
+        body("  ↑/↓ in input or Ctrl+P/N select · Alt+P quick peek card"),
         body("  Tab/Shift+Tab complete · → or Ctrl+F accept prediction"),
         heading("Reading"),
         body("  PgUp/PgDn or wheel scroll · Home/End top/bottom"),
         body("  Space or Alt+P quick peek candidate definition card"),
         body("  f follow a visible word (type the two hint letters)"),
         body("  e examples and references: compact / full"),
-        body("  v word forms: compact / full · r term relations: compact / full"),
+        body("  v word forms: collapsed / full · r term relations: collapsed / full"),
         body("  t etymology text: collapsed / full (session only)"),
         body("  p pronunciation (IPA): short / full"),
-        body("  Ctrl+J/K scroll one line · [/] previous/next group"),
+        body("  ↑/↓ or Ctrl+J/K scroll one line · [/] previous/next group"),
         body("  / find text · n/N next/previous match · o outline · F4 reading focus"),
         heading("Input editing"),
         body("  Ctrl+W or Alt+Backspace delete word · Ctrl+K kill to end"),
@@ -269,10 +269,18 @@ fn format_footer_help(
 }
 
 pub(super) fn footer_actions(app: &App, width: usize) -> Vec<(&'static str, Action)> {
-    let actions = if app.focus == Focus::Definition {
+    let actions = if !app.has_dictionary() {
         vec![
+            ("Enter download dictionary", Action::Download),
+            ("F2 settings", Action::Settings),
+        ]
+    } else if app.focus == Focus::Definition {
+        vec![
+            ("/ find", Action::Find),
+            ("o outline", Action::Outline),
+            ("e examples", Action::Examples),
+            ("Space peek", Action::Peek),
             ("f follow", Action::Follow),
-            ("Ctrl+G actions", Action::Commands),
             ("Esc input", Action::Focus),
             ("F1 help", Action::Help),
             ("F2 settings", Action::Settings),
@@ -296,6 +304,42 @@ pub(super) fn footer_actions(app: &App, width: usize) -> Vec<(&'static str, Acti
     }
     result.push(("Ctrl+C quit", Action::Quit));
     result
+}
+
+fn navigation_labels(app: &App, width: usize) -> Vec<(String, Action)> {
+    let count = usize::from(app.history_len() > 0) + usize::from(app.forward_len() > 0);
+    if count == 0 {
+        return Vec::new();
+    }
+    // Reserve the status and each complete control; both drawing and hit testing use this list.
+    let status = format!(
+        "{} · {} · {}/{}{}",
+        if app.focus == Focus::Input {
+            "Lookup"
+        } else {
+            "Reading"
+        },
+        app.results
+            .get(app.selected)
+            .map_or("no match", |c| match c.kind {
+                crate::MatchKind::Exact => "exact",
+                crate::MatchKind::Prefix => "prefix",
+                crate::MatchKind::Inflection => "word form",
+                crate::MatchKind::Fuzzy => "spelling suggestion",
+            }),
+        if app.results.is_empty() {
+            0
+        } else {
+            app.selected + 1
+        },
+        app.results.len(),
+        if app.loading { " · loading…" } else { "" }
+    );
+    let budget = width.saturating_sub(status.width() + count * 3) / count;
+    if budget < 12 {
+        return Vec::new();
+    }
+    app.navigation_labels(budget.saturating_sub(11).min(24))
 }
 
 pub(super) fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<String> {
@@ -346,18 +390,20 @@ pub(super) fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<Str
     } else {
         "Reading"
     };
-    let status = format!(
-        "{state} · {kind} · {}/{} · Back {} / Forward {}{}",
+    let mut status = format!(
+        "{state} · {kind} · {}/{}{}",
         if app.results.is_empty() {
             0
         } else {
             app.selected + 1
         },
         app.results.len(),
-        app.history_len(),
-        app.forward_len(),
         if app.loading { " · loading…" } else { "" }
     );
+    for (label, _) in navigation_labels(app, width) {
+        status.push_str(" · ");
+        status.push_str(&label);
+    }
     let status = app
         .error
         .as_deref()
@@ -387,6 +433,24 @@ pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect, pointer: &
         ),
         area,
     );
+    if !app.picking
+        && lines.len() > 1
+        && app.error.is_none()
+        && !app
+            .appearance_status
+            .as_deref()
+            .is_some_and(|s| s.starts_with("Not saved:"))
+    {
+        for (label, action) in navigation_labels(app, area.width as usize) {
+            if let Some(byte) = lines[0].find(&label) {
+                let x = area.x + lines[0][..byte].width() as u16;
+                pointer.footer.push((
+                    Region::from(Rect::new(x, area.y, label.width() as u16, 1)),
+                    action,
+                ));
+            }
+        }
+    }
     if !app.picking {
         let mut x = area.x;
         let y = area.y + lines.len().saturating_sub(1) as u16;

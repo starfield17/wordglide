@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
+    Download,
     Find,
     Outline,
     Layout,
@@ -64,6 +65,7 @@ impl Action {
             Self::Forms => "Expand word forms",
             Self::Relations => "Expand source term relations",
             Self::Etymology => "Expand etymology text",
+            Self::Download => "Download dictionary",
             Self::Find => "Find text in this definition",
             Self::Outline => "Definition outline",
             Self::Layout => "Reading layout: split / focus",
@@ -93,6 +95,7 @@ impl Action {
             Self::Forms => "v",
             Self::Relations => "r",
             Self::Etymology => "t",
+            Self::Download => "Enter",
             Self::Find => "/",
             Self::Outline => "o",
             Self::Layout => "F4",
@@ -132,7 +135,7 @@ impl App {
         };
         self.panel_query.clear();
         self.view.panel_row = if panel == Overlay::Outline {
-            self.reading.current_section(self.scroll).unwrap_or(0)
+            self.reading.outline_selection(self.scroll)
         } else {
             0
         };
@@ -214,14 +217,14 @@ impl App {
                 if self.view.content.forms {
                     "full"
                 } else {
-                    "compact"
+                    "collapsed"
                 }
             }
             Action::Relations => {
                 if self.view.content.relations {
                     "full"
                 } else {
-                    "compact"
+                    "collapsed"
                 }
             }
             Action::Etymology => {
@@ -257,6 +260,7 @@ impl App {
         }
         self.view.overlay = Overlay::None;
         match action {
+            Action::Download => self.start_download(),
             Action::Find => self.find_start(),
             Action::Outline => {
                 self.open_panel(Overlay::Outline);
@@ -410,7 +414,12 @@ impl App {
     }
     pub(crate) fn accept_panel_row(&mut self) {
         if self.view.overlay == Overlay::Outline {
-            if let Some(row) = self.reading.section_row(self.view.panel_row) {
+            if let Some(row) = self
+                .reading
+                .outline(&self.panel_query)
+                .get(self.view.panel_row)
+                .and_then(|(_, anchor)| self.reading.row_for_anchor(anchor))
+            {
                 self.scroll = row.min(self.max_scroll);
             }
         } else if let Some((distance, _)) = self.navigation_locations().get(self.view.panel_row) {
@@ -499,7 +508,7 @@ impl App {
             },
             Overlay::Outline | Overlay::History => {
                 let count = if self.view.overlay == Overlay::Outline {
-                    self.reading.sections.len()
+                    self.reading.outline(&self.panel_query).len()
                 } else {
                     self.navigation_locations().len()
                 };
@@ -517,7 +526,7 @@ impl App {
                     KeyCode::Home => self.view.panel_row = 0,
                     KeyCode::End => self.view.panel_row = count.saturating_sub(1),
                     KeyCode::Enter => self.accept_panel_row(),
-                    KeyCode::Backspace if self.view.overlay == Overlay::History => {
+                    KeyCode::Backspace => {
                         {
                             use unicode_segmentation::UnicodeSegmentation;
                             let start = self
@@ -530,9 +539,8 @@ impl App {
                         self.view.panel_row = 0;
                     }
                     KeyCode::Char(c)
-                        if self.view.overlay == Overlay::History
-                            && (key.modifiers.is_empty()
-                                || key.modifiers == crossterm::event::KeyModifiers::SHIFT) =>
+                        if (key.modifiers.is_empty()
+                            || key.modifiers == crossterm::event::KeyModifiers::SHIFT) =>
                     {
                         self.panel_paste(&c.to_string())
                     }

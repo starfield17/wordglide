@@ -1,6 +1,36 @@
 use super::*;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 impl App {
+    pub(crate) fn navigation_labels(&self, word_columns: usize) -> Vec<(String, Action)> {
+        let mut labels = Vec::new();
+        for (location, arrow, shortcut, action) in [
+            (self.history.back(), "←", "Ctrl+Z", Action::Back),
+            (self.forward.back(), "→", "Ctrl+Y", Action::Forward),
+        ] {
+            if let Some(location) = location {
+                let word = location
+                    .preview
+                    .as_ref()
+                    .map_or(location.input.as_str(), |p| p.entry.headword.as_str());
+                let mut label = String::new();
+                for g in word.graphemes(true) {
+                    if label.width() + g.width() > word_columns.saturating_sub(1) {
+                        break;
+                    }
+                    label.push_str(g);
+                }
+                if label != word {
+                    label.push('…');
+                }
+                let word = label;
+                labels.push((format!("{arrow} {word} ({shortcut})"), action));
+            }
+        }
+        labels
+    }
+
     pub fn back(&mut self) {
         let Some(old) = self.history.pop_back() else {
             return;

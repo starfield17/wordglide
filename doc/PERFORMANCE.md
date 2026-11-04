@@ -125,3 +125,18 @@ The validated schema-5 archive is distributed as
 and pinned in `data-release.json` with the SHA-256 above. Program releases reuse
 these verified bytes. Later dictionary updates must publish and verify the
 archive before changing the pin.
+
+## 0.6.0 reading update
+
+The same schema-5 full pack was exercised at 100×24, 120×30 and 120×40.
+With default reading preferences, the first source gloss of house, take and go
+appeared on reading rows 3–4. Forms and group relations now start as count
+summaries; all source terms remain available through expansion.
+
+A local native ARM64 macOS 100-iteration run measured async input-to-120×40
+TestBackend-render P95 at 3.589 ms. Reading scroll P95 for set/take/run was
+0.168/0.173/0.179 ms; resize plus example expansion P95 was
+1.317/1.612/2.104 ms. OS caches were not flushed and other verification was
+running; these are acceptance measurements, not a paired speedup claim.
+Full verification checked all 1,355,084 entries in 4.7 s. All five existing
+full-pack PTY checks passed, including content expansion and terminal restoration.

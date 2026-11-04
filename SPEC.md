@@ -60,7 +60,9 @@ replaced state. History is session-only and capped in both directions.
 Distribution: public Wordglide repository; two download types (program and shared
 data). Explicit --data wins, then a non-empty WORDGLIDE_DATA,
 then a managed download, then adjacent english-pack auto-discovery, then the
-existing user-data directory. Missing, invalid, or incompatible dictionary data,
+existing user-data directory. Enter without a usable dictionary explicitly requests download; startup never does.
+Named back/forward targets in the status line are clickable.
+Missing, invalid, or incompatible dictionary data,
 including discovery/receipt errors, opens the terminal session with diagnostic
 and F2/CLI download guidance. Query editing and Settings work without a worker;
 no lookup is queued until a dictionary is active. Explicit path errors never
@@ -101,10 +103,13 @@ the entry and shows scroll progress. Candidate panes size to their content, and
 a definition retained during loading is dimmed. An error is shown as a banner
 above the last good definition. Existing phrases included. Navigation history
 persists as reading preferences and does not affect ranking.
-Long entries: Ctrl+J/K scrolls one line in reading focus; arrows continue selecting
-candidates. [/] jumps between source groups, and o opens the source-group outline.
+Long entries: Up/Down and Ctrl+J/K scroll one line in reading focus, including
+follow hints. In input, Up/Down selects candidates; Ctrl+P/N explicitly selects
+candidates from either focus. [/] jumps between source groups, and o opens a searchable source-group and sense outline.
 Where source groups contain distinct etymology numbers, group headers and outline
-entries display [Etym n]; opening the outline preselects the active reading section.
+entries display [Etym n]; opening the outline preselects the active source sense
+or group. Typing/paste filters original glosses and group labels, case-insensitive
+and literal. Keyboard and mouse share source-addressed targets; Esc preserves position.
 Space in definition focus or Alt+P from any focus opens a transient candidate peek
 card overlay. The peek card previews the selected candidate's headword, POS, first
 gloss, and short example on demand without altering the current query, candidate
@@ -182,8 +187,8 @@ The existing ranking, inverse modern-form lookup, and two-example limit stay fix
 Source language_code is recorded as en in preparation provenance.
 Reading v expands forms, r expands relations, and t expands etymology. These
 three controls are session-only, appear in actions/help, and never enter config.
-Compact forms and each relation category show the first four source items plus
-an omitted count. Etymology is collapsed by default; p still controls the first
+Forms and group relations default to one combined count/shortcut summary; sense
+relations default to count summaries after examples. v/r reveal all source items. Etymology is collapsed by default; p still controls the first
 two versus all structured pronunciation records with original labels/notes.
 Group-level rich content is rendered once across modern/historical partitions.
 Explicit term spans make forms and relation phrases whole lookup targets in

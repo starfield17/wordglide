@@ -90,6 +90,14 @@ impl App {
             self.panel_key(key);
             return;
         }
+        if !self.has_dictionary() && key.code == KeyCode::Enter {
+            self.start_download();
+            return;
+        }
+        if self.focus == Focus::Definition && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            self.scroll_by(if key.code == KeyCode::Up { -1 } else { 1 });
+            return;
+        }
         let completion_key = matches!(key.code, KeyCode::Tab | KeyCode::BackTab | KeyCode::Enter)
             || (key.code == KeyCode::Right && self.cursor == self.input.len())
             || (key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL));
@@ -324,7 +332,7 @@ impl App {
         if self.view.modal() {
             if matches!(
                 self.view.overlay,
-                Overlay::Commands | Overlay::History | Overlay::Find
+                Overlay::Commands | Overlay::History | Overlay::Find | Overlay::Outline
             ) {
                 self.panel_paste(text);
             }

@@ -7,6 +7,7 @@
 then the user-data directory under `dict/english`. An explicitly selected invalid
 pack is diagnosed rather than replaced silently.
 
+Without a usable dictionary, **Enter** starts an explicit download.
 F2 Settings and `--download-data` install the official dictionary with progress,
 cancellation and checksum verification. The first installation enables lookup
 immediately. Updating an open dictionary preserves the session; restart to use
@@ -32,7 +33,8 @@ The bottom line's shortcuts are clickable.
 
 The candidate column stays the same width as you type. `=` marks exact matches,
 `→` word forms, and `≈` spelling suggestions. The status line shows focus,
-match type, candidate position, and available back/forward locations.
+match type, candidate position, and available back/forward locations. Named
+back/forward targets are clickable and restore the previous reading position.
 
 The action menu also toggles mouse capture for the current session, allowing
 native terminal selection without restarting. `--no-mouse` selects its initial
@@ -47,8 +49,8 @@ source categories. Forms and related phrases are whole keyboard/mouse lookup
 targets when present in the installed dictionary.
 
 In reading focus, **v** expands all forms, **r** expands all term relations, and
-**t** expands the original etymology text. Forms and each relation category show
-four items by default; omitted counts indicate more. Etymology starts collapsed.
+**t** expands the original etymology text. Forms and group relations start as a single source-count summary. Sense relations
+start as count summaries after examples; expand to see the original terms. Etymology starts collapsed.
 These three toggles are session-only; actions and F1 help list them. **p** retains
 its saved short/full IPA preference and now includes source dialect labels/notes.
 Expand/collapse, find, resizing, follow and back/forward preserve source positions.
@@ -62,15 +64,17 @@ This version supports English dictionaries and offers no language selector.
 In reading focus, **/** finds text in the displayed definition. Type or paste a
 literal, case-insensitive query, then Enter to keep it or Esc to restore your
 previous reading position. ↑/↓ in the search prompt moves through matches;
-**n/N** repeats after closing it. Hidden examples and IPA are not searched.
+**n/N** repeats after closing it. Collapsed forms, relations, etymology, examples and IPA are not searched.
 Changing words clears the search. Follow hints temporarily take precedence over
 search highlighting.
 
-Press **o** for the word / part-of-speech outline, or **[ / ]** for the previous /
+Press **o** for the searchable word / part-of-speech / sense outline, or **[ / ]** for the previous /
 next group. For entries with multiple etymologies, section headers and outline
 rows display `[Etym n]` branches, and opening the outline preselects the active
-section. **Ctrl+J/K** scrolls one line down/up; ↑/↓ continues selecting
-candidates. PageUp/PageDown and the wheel retain their existing behavior.
+sense or group. Type or paste to filter original glosses and group labels;
+Enter or a click jumps to the selected source position, and Esc cancels.
+**↑/↓** scrolls one line in reading focus; **Ctrl+J/K** also scrolls.
+Use Ctrl+P/N or the Space / Alt+P peek card to compare candidates. PageUp/PageDown and the wheel retain their existing behavior.
 **F4** toggles split / focused reading. Focused reading hides candidates while
 you read; returning to input shows them again. Lines are at most 96 columns.
 
@@ -190,7 +194,8 @@ data and code licenses.
 | Key | Action |
 | --- | --- |
 | Type / paste | Incremental lookup while input is focused |
-| ↑ / ↓ or Ctrl+P / Ctrl+N | Select candidate; preview follows |
+| ↑ / ↓ | Select candidate in input; scroll one line in reading |
+| Ctrl+P / Ctrl+N | Select candidate; preview follows |
 | PageUp / PageDown, or the wheel | Scroll the definition by one visible page; works while hints show |
 | Tab | Complete common prefix, then cycle a fixed candidate list |
 | Shift+Tab | Cycle completions backward |
@@ -202,8 +207,8 @@ data and code licenses.
 | Hint letters | Follow that word, without Enter |
 | `e` in definition | Examples and references: compact / full |
 | `p` in definition | Pronunciation (IPA): short / full |
-| `v` in definition | Word forms: compact / full |
-| `r` in definition | Term relations: compact / full |
+| `v` in definition | Word forms: collapsed / full |
+| `r` in definition | Term relations: collapsed / full |
 | `t` in definition | Etymology: collapsed / expanded |
 | `?` in definition / `F1` | Show the key help; Esc closes it |
 | Ctrl+G / F3 | Search and run available actions |

@@ -11,9 +11,8 @@ enum Part {
     Reference(usize),
     Blank,
     Form(usize),
-    FormsSummary,
+    SupplementSummary,
     Etymology(usize),
-    EtymologySummary,
     Relation(usize),
     RelationsSummary(RelationKind),
 }
@@ -114,6 +113,58 @@ pub(crate) struct ReadingState {
 }
 
 impl ReadingState {
+    /// Display and target derive from the same source node, including filtered rows.
+    pub(crate) fn outline(&self, query: &str) -> Vec<(String, Anchor)> {
+        let query = query.to_lowercase();
+        self.lines
+            .iter()
+            .filter_map(|line| {
+                let heading = line.node.part == Part::Header;
+                if !heading && !(line.node.part == Part::Gloss && line.node.sense.is_some()) {
+                    return None;
+                }
+                let context = line.section.and_then(|i| self.sections.get(i))?;
+                if !query.is_empty()
+                    && !format!("{} {}", context.title, line.text)
+                        .to_lowercase()
+                        .contains(&query)
+                {
+                    return None;
+                }
+                let label = if heading {
+                    context.title.clone()
+                } else {
+                    format!("  {} · {}", line.text, context.title)
+                };
+                Some((
+                    label,
+                    Anchor {
+                        node: line.node.clone(),
+                        offset: 0,
+                    },
+                ))
+            })
+            .collect()
+    }
+    pub(crate) fn outline_selection(&self, scroll: usize) -> usize {
+        let Some(current) = self
+            .rows
+            .get(scroll)
+            .and_then(|r| self.lines.get(r.logical))
+        else {
+            return 0;
+        };
+        self.outline("")
+            .iter()
+            .rposition(|(_, anchor)| {
+                anchor.node.entry == current.node.entry
+                    && anchor.node.group == current.node.group
+                    && anchor.node.historical == current.node.historical
+                    && (anchor.node.part == Part::Header || anchor.node.sense == current.node.sense)
+            })
+            .unwrap_or(0)
+    }
+
     pub(crate) fn same_preview(&self, preview: &Preview) -> bool {
         self.preview.as_ref().is_some_and(|old| {
             Arc::ptr_eq(&old.entry, &preview.entry)
@@ -326,7 +377,7 @@ fn append_relations(
             .enumerate()
             .filter(|(_, r)| r.kind == kind)
             .collect();
-        for (i, relation) in items.iter().take(if expanded { usize::MAX } else { 4 }) {
+        for (i, relation) in items.iter().take(if expanded { usize::MAX } else { 0 }) {
             let qualifier = if relation.sense.is_empty() {
                 String::new()
             } else {
@@ -350,9 +401,9 @@ fn append_relations(
             link_term(&mut line, &relation.word, format!("   {title}: ").len());
             lines.push(line);
         }
-        if !expanded && items.len() > 4 {
+        if !expanded && !items.is_empty() && sense.is_some() {
             lines.push(LogicalLine::new(
-                format!("   +{} {title} · r expands", items.len() - 4),
+                format!("   {title}: {} · r expands", items.len()),
                 TextRole::Dim,
                 node(sense, Part::RelationsSummary(kind)),
                 Some(section),
@@ -475,12 +526,30 @@ fn append_entry(
             // modern and historical reading sections.
             let first_partition = !historical || group.senses.iter().all(|s| s.historical());
             if first_partition {
+                let mut supplements = Vec::new();
+                if !group.forms.is_empty() {
+                    supplements.push(format!("v forms {}", group.forms.len()));
+                }
+                if !group.relations.is_empty() {
+                    supplements.push(format!("r relations {}", group.relations.len()));
+                }
+                if !group.etymology_text.is_empty() {
+                    supplements.push("t etymology".into());
+                }
+                if !supplements.is_empty() {
+                    lines.push(LogicalLine::new(
+                        format!("   {}", supplements.join(" · ")),
+                        TextRole::Dim,
+                        node(None, Part::SupplementSummary),
+                        Some(section),
+                    ));
+                }
                 for (i, form) in
                     group
                         .forms
                         .iter()
                         .enumerate()
-                        .take(if content.forms { usize::MAX } else { 4 })
+                        .take(if content.forms { usize::MAX } else { 0 })
                 {
                     let mut line = LogicalLine::new(
                         format!("   Form: {}{}", form.form, tags(&form.tags)),
@@ -491,29 +560,12 @@ fn append_entry(
                     link_term(&mut line, &form.form, "   Form: ".len());
                     lines.push(line);
                 }
-                if !content.forms && group.forms.len() > 4 {
-                    lines.push(LogicalLine::new(
-                        format!("   +{} forms · v expands", group.forms.len() - 4),
-                        TextRole::Dim,
-                        node(None, Part::FormsSummary),
-                        Some(section),
-                    ));
-                }
-                if !group.etymology_text.is_empty() {
-                    if content.etymology {
-                        for (i, text) in group.etymology_text.lines().enumerate() {
-                            lines.push(LogicalLine::new(
-                                format!("   Etymology: {text}"),
-                                TextRole::Dim,
-                                node(None, Part::Etymology(i)),
-                                Some(section),
-                            ));
-                        }
-                    } else {
+                if !group.etymology_text.is_empty() && content.etymology {
+                    for (i, text) in group.etymology_text.lines().enumerate() {
                         lines.push(LogicalLine::new(
-                            "   Etymology · t expands".into(),
+                            format!("   Etymology: {text}"),
                             TextRole::Dim,
-                            node(None, Part::EtymologySummary),
+                            node(None, Part::Etymology(i)),
                             Some(section),
                         ));
                     }
@@ -539,14 +591,6 @@ fn append_entry(
                     node(Some(*index), Part::Gloss),
                     Some(section),
                 ));
-                append_relations(
-                    lines,
-                    &sense.relations,
-                    content.relations,
-                    Some(*index),
-                    section,
-                    &node,
-                );
                 for (ei, example) in sense
                     .examples
                     .iter()
@@ -572,6 +616,14 @@ fn append_entry(
                         ));
                     }
                 }
+                append_relations(
+                    lines,
+                    &sense.relations,
+                    content.relations,
+                    Some(*index),
+                    section,
+                    &node,
+                );
                 lines.push(LogicalLine::new(
                     String::new(),
                     TextRole::Body,
@@ -716,7 +768,11 @@ mod content_tests {
         let (lines, _) = document(
             &preview,
             ReadingPreferences::default(),
-            ContentDisplay::default(),
+            ContentDisplay {
+                forms: true,
+                relations: true,
+                etymology: false,
+            },
         );
         for (prefix, visible, target) in [
             ("   Form: ", "Form", "form"),

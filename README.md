@@ -14,7 +14,7 @@ not equivalent to a professionally edited learner's dictionary.
 - Search as you type, with completion, form lookup and spelling suggestions.
 - Follow words and phrases with keyboard hints or the mouse, then return to
   your reading position.
-- Find within long entries, jump through an outline, and expand source content.
+- Find within long entries, search an outline of senses, and expand source content.
 - Nine themes, saved reading preferences and adjustable terminal colors.
 - Offline lookup; dictionary downloads happen only when requested.
 
@@ -57,7 +57,7 @@ To build from source or try the included sample, see
 
 | Key | Action |
 | --- | --- |
-| ↑ / ↓ | Select a candidate |
+| ↑ / ↓ | Select a candidate in input; scroll while reading |
 | Enter / Esc | Read the definition / return to input |
 | Tab | Complete and cycle matches |
 | `f` | Show hints for following words and phrases |

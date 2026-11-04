@@ -793,7 +793,7 @@ fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
                 );
                 if width >= 120 && height >= 12 {
                     let expected = vec![
-                        format!("Lookup · exact · 1/2 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
+                        format!("Lookup · exact · 1/2{}", if loading { " · loading…" } else { "" }),
                         "Enter read · Tab complete · Ctrl+G actions · F1 help · F2 settings · Ctrl+C quit".into(),
                     ];
                     assert_eq!(
@@ -828,8 +828,8 @@ fn width_adaptive_help_footer_never_exceeds_width_and_keeps_exit_hint() {
                 );
                 if width >= 120 && height >= 12 {
                     let expected = vec![
-                        format!("Reading · exact · 1/2 · Back 0 / Forward 0{}", if loading { " · loading…" } else { "" }),
-                        "f follow · Ctrl+G actions · Esc input · F1 help · F2 settings · Ctrl+C quit".into(),
+                        format!("Reading · exact · 1/2{}", if loading { " · loading…" } else { "" }),
+                        "/ find · o outline · e examples · Space peek · f follow · Esc input · F1 help · F2 settings · Ctrl+C quit".into(),
                     ];
                     assert_eq!(
                         lines, expected,
@@ -1692,8 +1692,12 @@ fn outline_view_preselects_current_reading_section() {
     // Open outline with 'o'
     stroke(&mut app, KeyCode::Char('o'));
     assert_eq!(app.view.overlay, Overlay::Outline);
-    // Outline selection matches current section #2
-    assert_eq!(app.view.panel_row, 2);
+    // The selected source target remains section #2 despite inserted sense rows.
+    let outline = app.reading.outline("");
+    assert_eq!(
+        app.reading.row_for_anchor(&outline[app.view.panel_row].1),
+        Some(target_row)
+    );
 
     // Esc closes outline
     stroke(&mut app, KeyCode::Esc);
@@ -1717,4 +1721,128 @@ fn history_back_closes_peek_card() {
     // Navigate back in history
     app.back();
     assert_eq!(app.view.overlay, Overlay::None);
+}
+
+#[test]
+fn named_back_link_is_clickable_and_first_gloss_is_near_top() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "take");
+    settle(&mut app);
+    let mut terminal = Terminal::new(TestBackend::new(120, 30)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let first = app
+        .reading
+        .rows
+        .iter()
+        .position(|r| r.text.starts_with("1. To get into"))
+        .unwrap();
+    assert!(first < 10);
+    assert!(
+        !app.reading
+            .lines
+            .iter()
+            .any(|l| l.text.starts_with("   Form:"))
+    );
+    app.focus = Focus::Definition;
+    app.jump_to("fist");
+    settle(&mut app);
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(footer_help(&app, 120, 2)[0].contains("← take (Ctrl+Z)"));
+    let (region, _) = pointer
+        .footer
+        .iter()
+        .find(|(_, a)| *a == crate::app::Action::Back)
+        .unwrap();
+    assert!(on_mouse(&mut app, &pointer, click(region.x, region.y)));
+    assert_eq!(app.input, "take");
+    assert_eq!(app.focus, Focus::Definition);
+}
+
+#[test]
+fn no_dictionary_enter_and_footer_request_explicit_download() {
+    let mut app = App::without_dictionary("house", "Missing data".into());
+    app.set_download_enabled(true);
+    assert_eq!(app.download.state, DownloadState::Idle);
+    assert!(footer_help(&app, 120, 2)[1].contains("Enter download"));
+    stroke(&mut app, KeyCode::Enter);
+    assert_eq!(app.download.state, DownloadState::Requested);
+    assert_eq!(app.input, "house");
+    stroke(&mut app, KeyCode::Esc);
+    assert_eq!(app.download.state, DownloadState::Cancelling);
+}
+
+#[test]
+fn filtered_outline_keyboard_and_mouse_share_exact_etymology_sense_target() {
+    for mouse in [false, true] {
+        let (_dir, dict) = dictionary();
+        let mut app = App::new(dict, "hope");
+        settle(&mut app);
+        app.focus = Focus::Definition;
+        let mut terminal = Terminal::new(TestBackend::new(120, 24)).unwrap();
+        let mut pointer = Pointer::default();
+        paint(&mut app, &mut terminal, &mut pointer);
+        let section = app
+            .reading
+            .sections
+            .iter()
+            .position(|s| s.title.contains("[Etym 2]"))
+            .unwrap();
+        let logical = app
+            .reading
+            .lines
+            .iter()
+            .position(|l| l.section == Some(section) && l.text.starts_with("1. "))
+            .unwrap();
+        let expected = app
+            .reading
+            .rows
+            .iter()
+            .position(|r| r.logical == logical)
+            .unwrap()
+            .min(app.max_scroll);
+        stroke(&mut app, KeyCode::Char('o'));
+        app.paste("[Etym 2]");
+        paint(&mut app, &mut terminal, &mut pointer);
+        if mouse {
+            let (region, _) = pointer
+                .navigation_rows
+                .iter()
+                .find(|(_, i)| *i == 1)
+                .unwrap();
+            assert!(on_mouse(&mut app, &pointer, click(region.x, region.y)));
+        } else {
+            stroke(&mut app, KeyCode::Down);
+            stroke(&mut app, KeyCode::Enter);
+        }
+        assert_eq!(app.scroll, expected);
+        assert_eq!(app.view.overlay, Overlay::None);
+        assert_eq!(app.input, "hope");
+    }
+}
+
+#[test]
+fn both_named_navigation_controls_fit_and_click_at_eighty_columns() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "take");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    app.jump_to("house");
+    settle(&mut app);
+    app.jump_to("fist");
+    settle(&mut app);
+    app.back();
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    for (action, expected) in [
+        (crate::app::Action::Forward, "fist"),
+        (crate::app::Action::Back, "house"),
+    ] {
+        let (region, _) = pointer.footer.iter().find(|(_, a)| *a == action).unwrap();
+        assert!(region.x + region.width <= 80);
+        assert!(on_mouse(&mut app, &pointer, click(region.x, region.y)));
+        assert_eq!(app.input, expected);
+        paint(&mut app, &mut terminal, &mut pointer);
+    }
 }

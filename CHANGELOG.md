@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0
+
+- Show definitions and examples promptly; forms and term relations start collapsed
+  into source-count summaries and remain expandable with v/r/t.
+- In reading focus, Up/Down scroll one line. Input arrows still select candidates;
+  Ctrl+P/N and the Space/Alt+P peek card compare candidates explicitly.
+- Search the outline by source gloss, word or part of speech, then jump directly
+  to a sense. Source positions survive expansion, resizing and navigation.
+- Click named back/forward targets in the status line. Reading shortcuts expose
+  find, outline, examples and peek; Enter requests download when no pack is usable.
+- Existing schema-5 dictionaries, configuration and public Rust API remain
+  compatible. No dictionary rebuild or download is required for this update.
+
 ## 0.5.0
 
 - Retain source word forms, per-sense and word-level term relations, etymology

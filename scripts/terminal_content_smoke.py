@@ -39,9 +39,11 @@ def main():
             last_find = text
 
         try:
-            expect("Form: went [past]")
+            expect("v forms")
             expect("Received-Pronunciation")
             session.send(b"\rvt")
+            session.drain(0.1)
+            expect("Form: went [past]")
             session.drain(0.1)
             find("Etymology: From Middle English")
             expect("Etymology: From Middle English")
@@ -68,7 +70,7 @@ def main():
             session.send(b"\x1a")
             expect("Derived terms: take off")
             session.send(b"\x1bOP")  # F1 help
-            expect("word forms: compact / full")
+            expect("word forms: collapsed / full")
             session.send(b"\x1b")
             session.drain(0.1)
             assert not list(Path(temporary).rglob("config.json")), "Session content toggles wrote configuration"

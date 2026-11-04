@@ -121,9 +121,9 @@ pub(super) fn render_reading_panel(frame: &mut Frame, app: &mut App, pointer: &m
     let outline = app.view.overlay == Overlay::Outline;
     let rows = if outline {
         app.reading
-            .sections
-            .iter()
-            .map(|s| s.title.clone())
+            .outline(&app.panel_query)
+            .into_iter()
+            .map(|(title, _)| title)
             .collect::<Vec<_>>()
     } else {
         app.navigation_locations()
@@ -148,7 +148,7 @@ pub(super) fn render_reading_panel(frame: &mut Frame, app: &mut App, pointer: &m
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(if outline {
-            "Jump to a word / part of speech".into()
+            format!("Filter senses: {}", app.panel_query)
         } else {
             format!("Filter: {}", app.panel_query)
         })
@@ -177,7 +177,7 @@ pub(super) fn render_reading_panel(frame: &mut Frame, app: &mut App, pointer: &m
     }
     if rows.is_empty() {
         frame.render_widget(
-            Paragraph::new("No matching locations").style(app.theme.dim()),
+            Paragraph::new("No matching locations or senses").style(app.theme.dim()),
             Rect::new(inner.x, inner.y + 2, inner.width, 1),
         );
     }
