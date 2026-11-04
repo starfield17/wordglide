@@ -134,9 +134,9 @@ appeared on reading rows 3–4. Forms and group relations now start as count
 summaries; all source terms remain available through expansion.
 
 A local native ARM64 macOS 100-iteration run measured async input-to-120×40
-TestBackend-render P95 at 3.589 ms. Reading scroll P95 for set/take/run was
-0.168/0.173/0.179 ms; resize plus example expansion P95 was
-1.317/1.612/2.104 ms. OS caches were not flushed and other verification was
+TestBackend-render P95 at 3.225 ms. Reading scroll P95 for set/take/run was
+0.149/0.152/0.163 ms; resize plus example expansion P95 was
+1.097/1.468/1.549 ms. OS caches were not flushed and other verification was
 running; these are acceptance measurements, not a paired speedup claim.
-Full verification checked all 1,355,084 entries in 4.7 s. All five existing
+Full verification checked all 1,355,084 entries in 5.0 s. All five existing
 full-pack PTY checks passed, including content expansion and terminal restoration.

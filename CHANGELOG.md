@@ -2,6 +2,8 @@
 
 ## 0.6.0
 
+- Refresh TLS and Zstd dependencies to versions fixing current RustSec advisories.
+
 - Show definitions and examples promptly; forms and term relations start collapsed
   into source-count summaries and remain expandable with v/r/t.
 - In reading focus, Up/Down scroll one line. Input arrows still select candidates;
