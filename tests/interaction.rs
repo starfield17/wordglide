@@ -533,3 +533,38 @@ fn peek_promotes_cached_preview_instantly_on_enter() {
     let s = screen(&mut app, 120, 30).join("\n");
     assert!(s.contains(&expected_headword), "{s}");
 }
+
+#[test]
+fn reading_arrows_scroll_without_changing_candidate() {
+    let (_dir, mut app) = app("take");
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 120, 24);
+    let selected = app.selected;
+    key(&mut app, KeyCode::Down);
+    assert_eq!(app.selected, selected);
+    assert_eq!(app.scroll, 1);
+    key(&mut app, KeyCode::Up);
+    assert_eq!(app.scroll, 0);
+}
+
+#[test]
+fn sense_outline_filters_original_gloss_and_cancel_keeps_position() {
+    let (_dir, mut app) = app("set");
+    key(&mut app, KeyCode::Enter);
+    screen(&mut app, 120, 24);
+    key(&mut app, KeyCode::Char('o'));
+    app.paste("divided by ability");
+    let outline = screen(&mut app, 120, 24).join("\n");
+    assert!(outline.contains("divided by ability"), "{outline}");
+    key(&mut app, KeyCode::Enter);
+    let reading = screen(&mut app, 120, 24).join("\n");
+    assert!(reading.contains("divided by ability"), "{reading}");
+    let position = app.scroll;
+    key(&mut app, KeyCode::Char('o'));
+    app.paste("no-such-sense-xyz");
+    assert!(screen(&mut app, 120, 24).join("\n").contains("No matching"));
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.scroll, position);
+    assert_eq!(app.input, "set");
+    assert_eq!(app.history_len(), 0);
+}
