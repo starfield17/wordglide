@@ -329,3 +329,93 @@ fn new_navigation_and_typing_clear_the_forward_stack() {
     app.forward();
     assert_eq!(app.input, "fistx", "editing drops the replaced states");
 }
+
+#[test]
+fn studied_entries_record_on_confirmed_transitions_without_typing_clutter() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "take");
+    settle(&mut app);
+    // Accepting "take" enters reading focus without pushing a duplicate self-step.
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.focus, Focus::Definition);
+    assert_eq!(app.history_len(), 0);
+
+    // Clear input and type a new lookup: partial keystrokes do not pollute history.
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.focus, Focus::Input);
+    control(&mut app, KeyCode::Char('u'));
+    for ch in ['h', 'o', 'u', 's', 'e'] {
+        key(&mut app, KeyCode::Char(ch));
+        settle(&mut app);
+        assert_eq!(
+            app.history_len(),
+            0,
+            "typing '{ch}' must not pollute navigation history"
+        );
+    }
+
+    // Confirming "house" promotes studied "take" to history.
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.focus, Focus::Definition);
+    assert_eq!(app.history_len(), 1);
+
+    // Stepping back restores "take" cleanly in reading focus.
+    control(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.input, "take");
+    assert_eq!(app.focus, Focus::Definition);
+    assert_eq!(app.history_len(), 0);
+
+    // Re-confirming the exact same entry again never pushes a duplicate.
+    key(&mut app, KeyCode::Esc);
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.history_len(), 0);
+
+    // Scrolling an entry also counts as studying it even without pressing Enter.
+    key(&mut app, KeyCode::Esc);
+    control(&mut app, KeyCode::Char('u'));
+    for ch in ['h', 'o', 'u', 's', 'e'] {
+        key(&mut app, KeyCode::Char(ch));
+        settle(&mut app);
+    }
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.history_len(), 1);
+    key(&mut app, KeyCode::Esc);
+    control(&mut app, KeyCode::Char('u'));
+    for ch in ['t', 'a', 'k', 'e'] {
+        key(&mut app, KeyCode::Char(ch));
+        settle(&mut app);
+    }
+    let mut small = Terminal::new(TestBackend::new(60, 12)).unwrap();
+    small.draw(|frame| draw(frame, &mut app)).unwrap();
+    key(&mut app, KeyCode::PageDown);
+    assert!(app.scroll > 0);
+    let scrolled_pos = app.scroll;
+    control(&mut app, KeyCode::Char('u'));
+    for ch in ['p', 'a', 'l', 'm'] {
+        key(&mut app, KeyCode::Char(ch));
+        settle(&mut app);
+    }
+    key(&mut app, KeyCode::Enter);
+    assert_eq!(app.history_len(), 3);
+    control(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.input, "take");
+    assert_eq!(app.scroll, scrolled_pos);
+    control(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.input, "house");
+
+    // Escaping to input and editing away without Enter still lets Ctrl+Z return to the studied entry.
+    key(&mut app, KeyCode::Esc);
+    // Before editing, Ctrl+Z leaves the current unedited entry ("house") back to "take" in history.
+    control(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.input, "take");
+    // Now focus input and edit to "palm" without pressing Enter; Ctrl+Z returns to "take" (not lost).
+    key(&mut app, KeyCode::Esc);
+    control(&mut app, KeyCode::Char('u'));
+    for ch in ['p', 'a', 'l', 'm'] {
+        key(&mut app, KeyCode::Char(ch));
+        settle(&mut app);
+    }
+    control(&mut app, KeyCode::Char('z'));
+    assert_eq!(app.input, "take");
+    assert_eq!(app.focus, Focus::Definition);
+}

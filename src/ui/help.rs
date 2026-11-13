@@ -57,7 +57,8 @@ fn help_lines(theme: Theme, focus: Focus) -> Vec<Line<'static>> {
         body("  t etymology text: collapsed / full (session only)"),
         body("  p pronunciation (IPA): short / full"),
         body("  ↑/↓ or Ctrl+J/K scroll one line · [/] previous/next group"),
-        body("  / find text · n/N next/previous match · o outline · F4 reading focus"),
+        body("  {/} previous/next sense · h fold/show archaic senses · y copy"),
+        body("  / find text · n/N match · o outline (#N jumps to sense) · F4 focus"),
         heading("Input editing"),
         body("  Ctrl+W or Alt+Backspace delete word · Ctrl+K kill to end"),
         body("  Ctrl+←/→ word motion · Alt+←/→ history back / forward"),
@@ -412,6 +413,7 @@ pub(super) fn footer_help(app: &App, width: usize, line_count: usize) -> Vec<Str
                 .as_deref()
                 .filter(|s| s.starts_with("Not saved:"))
         })
+        .or_else(|| app.status_notice())
         .unwrap_or(&status);
     vec![truncate_to_width(status, width), shortcuts]
 }
@@ -440,6 +442,7 @@ pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect, pointer: &
             .appearance_status
             .as_deref()
             .is_some_and(|s| s.starts_with("Not saved:"))
+        && app.status_notice().is_none()
     {
         for (label, action) in navigation_labels(app, area.width as usize) {
             if let Some(byte) = lines[0].find(&label) {

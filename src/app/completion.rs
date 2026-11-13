@@ -59,6 +59,14 @@ impl App {
     }
 
     fn accept_word(&mut self, word: String, reading: bool) {
+        if reading {
+            let next_key = self.results.get(self.selected).map(|c| c.key.clone());
+            let current_key = self.preview.as_ref().map(|p| p.entry.key.as_str());
+            if self.studied && current_key != next_key.as_deref() {
+                self.capture_studied_origin();
+            }
+            self.confirm_studied(next_key.as_deref(), &word);
+        }
         let restart = self.input != word || self.completion.is_some();
         self.input = word;
         self.cursor = self.input.len();

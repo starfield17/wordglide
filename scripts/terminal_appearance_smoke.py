@@ -26,7 +26,8 @@ class Session:
         self.before = termios.tcgetattr(self.slave)
         self.output = bytearray()
         self.process = subprocess.Popen(command, env=env, stdin=self.slave,
-                                        stdout=self.slave, stderr=self.slave)
+                                        stdout=self.slave, stderr=self.slave,
+                                        start_new_session=True)
 
     def wait(self, predicate, description):
         deadline = time.monotonic() + 5
@@ -47,9 +48,14 @@ class Session:
         os.write(self.master, data)
 
     def close(self):
+        closed_fds = False
         try:
             self.send(b"\x03")
-            self.process.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while self.process.poll() is None and time.monotonic() < deadline:
+                self.drain(0.05)
+            if self.process.poll() is None:
+                raise AssertionError(f"Timed out waiting for exit: {self.output[-600:]!r}")
             self.drain(0.1)
             assert self.process.returncode == 0, self.output[-600:]
             assert termios.tcgetattr(self.slave) == self.before, "Terminal attributes not restored"
@@ -58,9 +64,13 @@ class Session:
         finally:
             if self.process.poll() is None:
                 self.process.kill()
+                os.close(self.master)
+                os.close(self.slave)
+                closed_fds = True
                 self.process.wait(timeout=5)
-            os.close(self.master)
-            os.close(self.slave)
+            if not closed_fds:
+                os.close(self.master)
+                os.close(self.slave)
 
 
 def main():

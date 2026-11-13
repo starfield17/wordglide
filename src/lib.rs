@@ -27,9 +27,9 @@ mod store;
 mod theme;
 mod ui;
 
-pub use app::{App, Focus, ReadingLayout, ReadingPreferences};
+pub use app::{App, Focus, ReadingLayout, ReadingPreferences, format_preview};
 pub use build::build_pack;
-pub use download::downloaded_data_path;
+pub use download::{downloaded_data_path, prune_downloaded_packs};
 pub use model::{
     Candidate, Entry, Example, Group, MatchKind, Preview, Pronunciation, RelationKind, Sense,
     TermRelation, WordForm,

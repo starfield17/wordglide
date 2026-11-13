@@ -8,7 +8,7 @@ fn word_char(c: char) -> bool {
 }
 
 /// Byte offset of the start of the word before `cursor`, skipping whitespace.
-fn prev_word_boundary(text: &str, cursor: usize) -> usize {
+pub(super) fn prev_word_boundary(text: &str, cursor: usize) -> usize {
     let mut index = cursor.min(text.len());
     while index > 0 {
         let previous = text[..index].graphemes(true).next_back().unwrap();
@@ -94,7 +94,10 @@ impl App {
             self.start_download();
             return;
         }
-        if self.focus == Focus::Definition && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+        if self.focus == Focus::Definition
+            && !self.picking
+            && matches!(key.code, KeyCode::Up | KeyCode::Down)
+        {
             self.scroll_by(if key.code == KeyCode::Up { -1 } else { 1 });
             return;
         }
@@ -113,6 +116,7 @@ impl App {
                 KeyCode::Char('z') => self.back(),
                 KeyCode::Char('y') => self.forward(),
                 KeyCode::Char('u') if self.focus == Focus::Input => {
+                    self.capture_studied_origin();
                     self.input.clear();
                     self.cursor = 0;
                     self.focus = Focus::Input;
@@ -124,6 +128,7 @@ impl App {
                 KeyCode::Char('e') if self.focus == Focus::Input => self.cursor = self.input.len(),
                 KeyCode::Char('f') if self.focus == Focus::Input => self.accept_inline(),
                 KeyCode::Char('w') if self.focus == Focus::Input => {
+                    self.capture_studied_origin();
                     let previous = prev_word_boundary(&self.input, self.cursor);
                     self.input.drain(previous..self.cursor);
                     self.cursor = previous;
@@ -137,6 +142,9 @@ impl App {
                     self.scroll_by(-1);
                 }
                 KeyCode::Char('k') if self.focus == Focus::Input => {
+                    if self.cursor < self.input.len() {
+                        self.capture_studied_origin();
+                    }
                     self.input.truncate(self.cursor);
                     self.search();
                 }
@@ -151,11 +159,11 @@ impl App {
                         self.accept(false);
                     }
                     self.pending_completion.clear();
-                    self.focus = if self.focus == Focus::Input {
-                        Focus::Definition
+                    if self.focus == Focus::Input {
+                        self.focus_definition();
                     } else {
-                        Focus::Input
-                    };
+                        self.focus_input();
+                    }
                 }
                 _ => {}
             }
@@ -167,6 +175,7 @@ impl App {
                 KeyCode::Right => self.forward(),
                 KeyCode::Char('p') => self.execute_action(Action::Peek),
                 KeyCode::Backspace if self.focus == Focus::Input => {
+                    self.capture_studied_origin();
                     let previous = prev_word_boundary(&self.input, self.cursor);
                     self.input.drain(previous..self.cursor);
                     self.cursor = previous;
@@ -179,20 +188,29 @@ impl App {
         }
         if self.picking {
             match key.code {
-                KeyCode::Esc | KeyCode::Tab => {
-                    self.picking = false;
-                    self.label_input.clear();
-                }
+                KeyCode::Esc | KeyCode::Tab => self.cancel_picking(),
                 // Scrolling keeps hints usable on definitions longer than the
                 // pane; labels are rebuilt for the new lines on the next frame.
+                KeyCode::Up => {
+                    self.scroll_by(-1);
+                }
+                KeyCode::Down => {
+                    self.scroll_by(1);
+                }
                 KeyCode::PageDown => {
                     self.scroll_by(self.page as isize);
                 }
                 KeyCode::PageUp => {
                     self.scroll_by(-(self.page as isize));
                 }
-                KeyCode::Home => self.scroll = 0,
-                KeyCode::End => self.scroll = self.max_scroll,
+                KeyCode::Home => {
+                    self.scroll = 0;
+                    self.label_input.clear();
+                }
+                KeyCode::End => {
+                    self.scroll = self.max_scroll;
+                    self.label_input.clear();
+                }
                 KeyCode::Backspace => {
                     self.label_input.pop();
                 }
@@ -204,8 +222,7 @@ impl App {
                             .iter()
                             .find(|(label, _)| label == &self.label_input)
                             .map(|(_, word)| word.clone());
-                        self.label_input.clear();
-                        self.picking = false;
+                        self.cancel_picking();
                         if let Some(word) = target {
                             self.jump_to(&word);
                         }
@@ -236,7 +253,7 @@ impl App {
                         self.restore(completion.original);
                     }
                 } else {
-                    self.focus = Focus::Input;
+                    self.focus_input();
                 }
             }
             KeyCode::Char('/') if self.focus == Focus::Definition => {
@@ -249,6 +266,14 @@ impl App {
             KeyCode::Char('N') if self.focus == Focus::Definition => self.next_match(true),
             KeyCode::Char('[') if self.focus == Focus::Definition => self.move_section(true),
             KeyCode::Char(']') if self.focus == Focus::Definition => self.move_section(false),
+            KeyCode::Char('{') if self.focus == Focus::Definition => self.move_sense(true),
+            KeyCode::Char('}') if self.focus == Focus::Definition => self.move_sense(false),
+            KeyCode::Char('y') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Yank)
+            }
+            KeyCode::Char('h') if self.focus == Focus::Definition => {
+                self.execute_action(Action::Historical)
+            }
             KeyCode::Char('f') if self.focus == Focus::Definition && self.preview.is_some() => {
                 self.picking = true;
                 self.label_input.clear();
@@ -292,6 +317,7 @@ impl App {
             KeyCode::Home if self.focus == Focus::Input => self.cursor = 0,
             KeyCode::End if self.focus == Focus::Input => self.cursor = self.input.len(),
             KeyCode::Backspace if self.focus == Focus::Input && self.cursor > 0 => {
+                self.capture_studied_origin();
                 let previous = self.input[..self.cursor]
                     .grapheme_indices(true)
                     .next_back()
@@ -303,12 +329,15 @@ impl App {
             }
             KeyCode::Delete if self.focus == Focus::Input => {
                 if let Some(c) = self.input[self.cursor..].graphemes(true).next() {
-                    self.input.drain(self.cursor..self.cursor + c.len());
+                    let len = c.len();
+                    self.capture_studied_origin();
+                    self.input.drain(self.cursor..self.cursor + len);
                     self.snap_cursor();
                     self.search();
                 }
             }
             KeyCode::Char(c) if self.focus == Focus::Input => {
+                self.capture_studied_origin();
                 self.input.insert(self.cursor, c);
                 self.cursor += c.len_utf8();
                 self.snap_cursor();
@@ -351,6 +380,9 @@ impl App {
                     }
                 })
                 .collect();
+            if !clean.is_empty() {
+                self.capture_studied_origin();
+            }
             self.input.insert_str(self.cursor, &clean);
             self.cursor += clean.len();
             self.snap_cursor();

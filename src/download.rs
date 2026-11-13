@@ -161,6 +161,13 @@ struct Receipt {
     archive_sha256: String,
     release: String,
     snapshot: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    previous_directory: Option<String>,
+}
+fn valid_pack_dir_name(name: &str) -> bool {
+    name.strip_prefix("pack-").is_some_and(|suffix| {
+        !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_alphanumeric())
+    })
 }
 fn read_receipt(root: &Path) -> Result<Option<Receipt>> {
     let path = root.join("current.json");
@@ -206,6 +213,92 @@ pub(crate) fn root() -> Result<PathBuf> {
 /// CLI data overrides take precedence over this location.
 pub fn downloaded_data_path() -> Result<Option<PathBuf>> {
     locate(&root()?)
+}
+
+fn prune_packs_locked(root: &Path, keep_rollbacks: usize) -> Result<usize> {
+    let receipt = read_receipt(root)?;
+    let packs = root.join("packs");
+    if !packs.is_dir() {
+        return Ok(0);
+    }
+    let active = receipt
+        .as_ref()
+        .and_then(|r| r.directory.strip_prefix("packs/"))
+        .filter(|name| valid_pack_dir_name(name));
+    let mut keep: HashSet<String> = active.into_iter().map(str::to_string).collect();
+    if active.is_some() && keep_rollbacks > 0 {
+        let target_keep = 1 + keep_rollbacks;
+        if let Some(previous) = receipt
+            .as_ref()
+            .and_then(|r| r.previous_directory.as_deref())
+            .and_then(|d| d.strip_prefix("packs/"))
+            .filter(|name| {
+                valid_pack_dir_name(name) && !keep.contains(*name) && packs.join(name).is_dir()
+            })
+        {
+            keep.insert(previous.to_string());
+        }
+        if keep.len() < target_keep {
+            let mut candidates: Vec<(std::time::SystemTime, String)> = Vec::new();
+            for entry in fs::read_dir(&packs)? {
+                let entry = entry?;
+                let file_name = entry.file_name();
+                let Some(name) = file_name.to_str() else {
+                    continue;
+                };
+                if !valid_pack_dir_name(name) || keep.contains(name) {
+                    continue;
+                }
+                let path = entry.path();
+                if path.join("english-pack/manifest.json").is_file() {
+                    let modified = fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                    candidates.push((modified, name.to_string()));
+                }
+            }
+            candidates.sort_by(|a, b| b.cmp(a));
+            for (_, name) in candidates {
+                if keep.len() >= target_keep {
+                    break;
+                }
+                keep.insert(name);
+            }
+        }
+    }
+    let mut removed = 0usize;
+    for entry in fs::read_dir(&packs)? {
+        let entry = entry?;
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str() else {
+            continue;
+        };
+        if valid_pack_dir_name(name) && !keep.contains(name) && entry.file_type()?.is_dir() {
+            fs::remove_dir_all(entry.path())?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn prune_packs_in(root: &Path, keep_rollbacks: usize) -> Result<usize> {
+    if !root.join("packs").is_dir() {
+        return Ok(0);
+    }
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(root.join("install.lock"))?;
+    FileExt::try_lock_exclusive(&lock)
+        .context("Another dictionary installation is already running")?;
+    prune_packs_locked(root, keep_rollbacks)
+}
+
+/// Remove stale unreferenced downloaded dictionary packs while retaining the active and rollback packs.
+pub fn prune_downloaded_packs() -> Result<usize> {
+    prune_packs_in(&root()?, 1)
 }
 
 #[derive(Debug, Clone)]
@@ -515,11 +608,17 @@ fn install(
             .context("Missing staging name")?
             .to_string_lossy()
     );
+    let previous_directory = read_receipt(root)
+        .ok()
+        .flatten()
+        .map(|r| r.directory)
+        .filter(|prev| prev != &directory);
     let receipt = Receipt {
         directory,
         archive_sha256: hash,
         release: release.tag_name,
         snapshot: snapshot.clone(),
+        previous_directory,
     };
     fs::remove_file(archive_path)?;
     fs::File::open(&pack)?.sync_all()?;
@@ -537,6 +636,7 @@ fn install(
     let directory = stage.keep();
     // Once the pointer is committed, the verified pack must survive even if syncing fails.
     let _ = fs::File::open(root).and_then(|f| f.sync_all());
+    let _ = prune_packs_locked(root, 1);
     Ok(Installed {
         path: directory.join("english-pack"),
         snapshot,

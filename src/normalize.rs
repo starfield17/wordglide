@@ -1,10 +1,27 @@
-use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 pub fn normalize(text: &str) -> String {
     text.nfkc()
         .flat_map(char::to_lowercase)
         .map(|c| match c {
             '\u{2018}' | '\u{2019}' => '\'',
+            _ => c,
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub(crate) fn fold_diacritics(text: &str) -> String {
+    text.nfd()
+        .flat_map(char::to_lowercase)
+        .filter(|&c| !is_combining_mark(c))
+        .map(|c| match c {
+            '\u{2018}' | '\u{2019}' => '\'',
+            'ø' => 'o',
+            'ł' => 'l',
+            'đ' => 'd',
             _ => c,
         })
         .collect::<String>()

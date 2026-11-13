@@ -8,11 +8,16 @@ mod worker;
 
 use crate::{Appearance, Candidate, Dictionary, Preview, normalize, store::Lexicon, theme::Theme};
 use crossterm::event::KeyEvent;
-use std::{collections::VecDeque, sync::mpsc};
+use std::{
+    collections::VecDeque,
+    sync::mpsc,
+    time::{Duration, Instant},
+};
 
 pub(crate) use actions::Action;
 use completion::Completion;
-pub(crate) use reading::{Anchor, ReadingState};
+pub use reading::format_preview;
+pub(crate) use reading::{Anchor, ReadingState, Section};
 pub(crate) use reading::{LogicalLine, TextRole, TextRow, document};
 pub(crate) use view::{ContentDisplay, DownloadState, Overlay, ViewOptions};
 pub use view::{ReadingLayout, ReadingPreferences};
@@ -66,6 +71,14 @@ pub struct App {
     pub(crate) dictionary_notice: Option<String>,
     pub(crate) peek_index: usize,
     pub(crate) peek_preview: Option<Preview>,
+    pub(crate) peek_loading: bool,
+    pack_info: Option<crate::PackInfo>,
+    pack_path: Option<std::path::PathBuf>,
+    pending_pack_update: Option<String>,
+    pending_yank: Option<String>,
+    status_notice: Option<(String, Instant)>,
+    studied: bool,
+    studied_origin: Option<Location>,
     lexicon: Option<Lexicon>,
     history: VecDeque<Location>,
     forward: VecDeque<Location>,
@@ -88,6 +101,8 @@ impl App {
 
     fn initialize(dictionary: Option<Dictionary>, query: &str, notice: Option<String>) -> Self {
         let lexicon = dictionary.as_ref().map(Dictionary::lexicon);
+        let pack_info = dictionary.as_ref().map(|d| d.info().clone());
+        let pack_path = dictionary.as_ref().map(|d| d.path().to_path_buf());
         let (request, response) = match dictionary {
             Some(dictionary) => {
                 let (request, response) = worker::spawn(dictionary);
@@ -121,6 +136,14 @@ impl App {
             dictionary_notice: notice,
             peek_index: 0,
             peek_preview: None,
+            peek_loading: false,
+            pack_info,
+            pack_path,
+            pending_pack_update: None,
+            pending_yank: None,
+            status_notice: None,
+            studied: false,
+            studied_origin: None,
             lexicon,
             history: VecDeque::new(),
             forward: VecDeque::new(),
@@ -223,6 +246,29 @@ impl App {
             .is_some_and(|lexicon| lexicon.contains(word))
     }
 
+    pub(crate) fn contains_normalized(&self, key: &str) -> bool {
+        self.lexicon
+            .as_ref()
+            .is_some_and(|lexicon| lexicon.contains_normalized(key))
+    }
+
+    pub(crate) fn take_yank(&mut self) -> Option<String> {
+        self.pending_yank.take()
+    }
+
+    pub(crate) fn status_notice(&self) -> Option<&str> {
+        self.status_notice.as_ref().map(|(text, _)| text.as_str())
+    }
+
+    pub(crate) fn set_status_notice(&mut self, notice: String) {
+        self.status_notice = Some((notice, Instant::now() + Duration::from_secs(3)));
+    }
+
+    pub(crate) fn cancel_picking(&mut self) {
+        self.picking = false;
+        self.label_input.clear();
+    }
+
     /// Move the reading position by `lines` relative to the current offset,
     /// clamped to the content. Returns whether the position actually changed.
     pub(crate) fn scroll_by(&mut self, lines: isize) -> bool {
@@ -233,7 +279,16 @@ impl App {
             self.scroll.saturating_add(lines as usize)
         };
         self.scroll = target.min(self.max_scroll);
-        self.scroll != before
+        if self.picking {
+            self.label_input.clear();
+        }
+        let moved = self.scroll != before;
+        if moved && self.preview.is_some() && !self.loading {
+            let key = self.preview.as_ref().map(|p| p.entry.key.clone());
+            let input = self.input.clone();
+            self.confirm_studied(key.as_deref(), &input);
+        }
+        moved
     }
 
     fn search(&mut self) {
@@ -250,7 +305,7 @@ impl App {
         self.max_scroll = 0;
         self.results.clear();
         self.error = None;
-        self.picking = false;
+        self.cancel_picking();
         self.labels.clear();
         self.loading = self.request.is_some() && !normalize(&self.input).is_empty();
         if self
@@ -265,18 +320,41 @@ impl App {
         self.lexicon.is_some()
     }
 
+    pub(crate) fn pack_info(&self) -> Option<&crate::PackInfo> {
+        self.pack_info.as_ref()
+    }
+
+    pub(crate) fn pack_path(&self) -> Option<&std::path::Path> {
+        self.pack_path.as_deref()
+    }
+
+    pub(crate) fn pending_pack_update(&self) -> Option<&str> {
+        self.pending_pack_update.as_deref()
+    }
+
+    pub(crate) fn set_pending_pack_update(&mut self, snapshot: String) {
+        self.pending_pack_update = Some(snapshot);
+    }
+
     /// First installation starts lookup immediately; updates retain the active session.
     pub(crate) fn activate_dictionary(&mut self, dictionary: Dictionary) -> bool {
         if self.has_dictionary() {
             return false;
         }
         self.lexicon = Some(dictionary.lexicon());
+        self.pack_info = Some(dictionary.info().clone());
+        self.pack_path = Some(dictionary.path().to_path_buf());
+        self.pending_pack_update = None;
         let (request, response) = worker::spawn(dictionary);
         self.request = Some(request);
         self.response = Some(response);
         self.dictionary_notice = None;
         self.search();
         true
+    }
+
+    pub(crate) fn is_polling_fast(&self) -> bool {
+        self.loading || self.peek_loading || self.download.state.is_active()
     }
 
     fn send_request(&self, request: Request) -> Result<(), mpsc::SendError<Request>> {
@@ -288,12 +366,19 @@ impl App {
 
     fn worker_error(&mut self) {
         self.loading = false;
+        self.peek_loading = false;
         self.error = Some("Dictionary worker stopped".into());
     }
 
     /// Apply only responses belonging to the current query and selected candidate.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
+        if let Some((_, until)) = &self.status_notice
+            && Instant::now() >= *until
+        {
+            self.status_notice = None;
+            changed = true;
+        }
         while let Some(Ok(response)) = self.response.as_ref().map(|response| response.try_recv()) {
             match response {
                 Response::Search(id, result) if id == self.generation => {
@@ -323,15 +408,16 @@ impl App {
                     changed = true;
                 }
                 Response::Peek(id, index, result)
-                    if id == self.generation
-                        && self.view.overlay == Overlay::Peek
-                        && self.peek_index == index =>
+                    if id == self.generation && self.peek_index == index =>
                 {
-                    match result {
-                        Ok(preview) => self.peek_preview = Some(preview),
-                        Err(error) => self.error = Some(error),
+                    self.peek_loading = false;
+                    if self.view.overlay == Overlay::Peek {
+                        match result {
+                            Ok(preview) => self.peek_preview = Some(preview),
+                            Err(error) => self.error = Some(error),
+                        }
+                        changed = true;
                     }
-                    changed = true;
                 }
                 _ => {}
             }
@@ -369,6 +455,7 @@ impl App {
         if selected == self.selected || selected >= self.results.len() {
             return;
         }
+        self.capture_studied_origin();
         self.selected = selected;
         self.reading.clear_find();
         self.reading.restore_anchor = None;
@@ -376,7 +463,7 @@ impl App {
         self.max_scroll = 0;
         self.error = None;
         self.loading = true;
-        self.picking = false;
+        self.cancel_picking();
         if self
             .send_request(Request::Preview(
                 self.generation,
@@ -392,10 +479,9 @@ impl App {
         if !self.contains(word) {
             return;
         }
-        self.history.push_back(self.location());
-        if self.history.len() > HISTORY_LIMIT {
-            self.history.pop_front();
-        }
+        self.studied_origin = None;
+        self.push_history(self.location());
+        self.studied = true;
         self.input = normalize(word);
         self.cursor = self.input.len();
         self.focus = Focus::Definition;

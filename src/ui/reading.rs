@@ -81,22 +81,7 @@ impl ReadingLine {
 
     /// Explicit source terms override tokenization, including wrapped phrases.
     pub(super) fn lookup_spans(&self) -> Vec<(Range<usize>, String)> {
-        let mut result = self.links.clone();
-        let mut offset = 0;
-        for token in self.text.split_word_bounds() {
-            let range = offset..offset + token.len();
-            offset = range.end;
-            if token.chars().any(char::is_alphanumeric)
-                && !self
-                    .links
-                    .iter()
-                    .any(|(link, _)| link.start < range.end && range.start < link.end)
-            {
-                result.push((range, crate::normalize(token)));
-            }
-        }
-        result.sort_by_key(|(range, _)| range.start);
-        result
+        compute_lookup_spans(&self.text, &self.links)
     }
 
     fn spans(&self, range: Range<usize>) -> Vec<Span<'static>> {
@@ -142,6 +127,64 @@ fn logical_line(source: &LogicalLine, theme: Theme) -> ReadingLine {
         line.styles.push((start..line.text.len(), theme.dim()));
     }
     line
+}
+
+pub(super) fn compute_lookup_spans(
+    text: &str,
+    links: &[(Range<usize>, String)],
+) -> Vec<(Range<usize>, String)> {
+    let mut result = links.to_vec();
+    let mut offset = 0;
+    for token in text.split_word_bounds() {
+        let range = offset..offset + token.len();
+        offset = range.end;
+        if token.chars().any(char::is_alphanumeric)
+            && !links
+                .iter()
+                .any(|(link, _)| link.start < range.end && range.start < link.end)
+        {
+            result.push((range, crate::normalize(token)));
+        }
+    }
+    result.sort_by_key(|(range, _)| range.start);
+    result
+}
+
+fn slice_row_links(
+    row: &TextRow,
+    source_links: &[(Range<usize>, String)],
+    dst: &mut Vec<(Range<usize>, String)>,
+) {
+    let row_end = row.start + row.text.len().saturating_sub(row.prefix);
+    for (link, target) in source_links {
+        let start = link.start.max(row.start);
+        let end = link.end.min(row_end);
+        if start < end {
+            let mapped = row.prefix + start - row.start..row.prefix + end - row.start;
+            if let Some((previous, key)) = dst.last_mut()
+                && previous.end == mapped.start
+                && key == target
+            {
+                previous.end = mapped.end;
+            } else {
+                dst.push((mapped, target.clone()));
+            }
+        }
+    }
+}
+
+pub(super) fn ensure_visible_spans(app: &mut App, range: Range<usize>) {
+    let end = range.end.min(app.reading.rows.len());
+    for i in range.start..end {
+        if app.reading.rows[i].spans.is_none() {
+            let row = &app.reading.rows[i];
+            let source = &app.reading.lines[row.logical];
+            let mut links = Vec::new();
+            slice_row_links(row, &source.links, &mut links);
+            let spans = compute_lookup_spans(&row.text, &links);
+            app.reading.rows[i].spans = Some(spans);
+        }
+    }
 }
 
 /// Rebuild source text only when the preview or display preferences change;
@@ -213,6 +256,7 @@ pub(super) fn prepare_reading(app: &mut App, width: usize) {
                     logical,
                     start,
                     prefix,
+                    spans: None,
                 });
             }
         }
@@ -242,16 +286,13 @@ pub(super) fn styled_rows(app: &App, range: Range<usize>) -> Vec<ReadingLine> {
                 TextRole::Accent => app.theme.accent(),
             };
             let mut line = ReadingLine::new(row.text.clone(), style);
-            for (link, target) in &source.links {
-                let start = link.start.max(row.start);
-                let end = link
-                    .end
-                    .min(row.start + row.text.len().saturating_sub(row.prefix));
-                if start < end {
-                    line.add_link(
-                        row.prefix + start - row.start..row.prefix + end - row.start,
-                        target,
-                    );
+            slice_row_links(row, &source.links, &mut line.links);
+            if app.theme.color && source.is_link_list() {
+                let active_link = app.theme.body().add_modifier(Modifier::UNDERLINED);
+                for (link, target) in &line.links {
+                    if app.contains_normalized(target) {
+                        line.styles.push((link.clone(), active_link));
+                    }
                 }
             }
             if let Some(start) = source.secondary_start {
@@ -397,7 +438,8 @@ pub(super) fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
                 line.push(" ", source.style_at(offset));
             } else if !ch.is_control() {
                 let start = line.text.len();
-                line.push(&ch.to_string(), source.style_at(offset));
+                let mut buf = [0u8; 4];
+                line.push(ch.encode_utf8(&mut buf), source.style_at(offset));
                 if let Some((_, target)) = source.links.iter().find(|(r, _)| r.contains(&offset)) {
                     line.add_link(start..line.text.len(), target);
                 }
@@ -415,43 +457,83 @@ pub(super) fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
         let mut current = ReadingLine::new(String::new(), line.style);
         let mut columns = 0;
         let mut is_continuation = false;
-        let mut offset = 0;
-        for token in line.text.split_word_bounds() {
-            let start = offset;
-            offset += token.len();
-            let is_ws = token.chars().all(char::is_whitespace);
-            if is_continuation && columns == indent && is_ws {
-                continue;
-            }
-            let n = token.width();
-            let min_cols = if is_continuation { indent } else { 0 };
-            if columns + n > width && columns > min_cols {
-                result.push(current);
-                is_continuation = true;
-                current = ReadingLine::new(indent_str.clone(), line.style);
-                columns = indent;
-                if is_ws {
-                    continue;
-                }
-            }
-            if columns + n <= width {
-                current.push_from(&line, start..offset);
-                columns += n;
-            } else {
-                for (byte, grapheme) in token.grapheme_indices(true) {
-                    let gn = grapheme.width();
-                    let min_cols = if is_continuation { indent } else { 0 };
-                    if columns + gn > width && columns > min_cols {
-                        result.push(current);
+
+        if line.text.contains(" · ") {
+            let mut seg_start = 0;
+            while seg_start < line.text.len() {
+                let search_from = if line.text[seg_start..].starts_with(" · ") {
+                    seg_start + " · ".len()
+                } else {
+                    seg_start
+                };
+                let seg_end = line.text[search_from..]
+                    .find(" · ")
+                    .map_or(line.text.len(), |rel| search_from + rel);
+                let effective_start = if is_continuation
+                    && columns == indent
+                    && line.text[seg_start..seg_end].starts_with(' ')
+                {
+                    seg_start + 1
+                } else {
+                    seg_start
+                };
+                let seg_range = effective_start..seg_end;
+                let seg_width = line.text[seg_range.clone()].width();
+                let min_cols = if is_continuation { indent } else { 0 };
+                if columns + seg_width <= width {
+                    current.push_from(&line, seg_range);
+                    columns += seg_width;
+                } else {
+                    let trimmed_start = if columns > min_cols {
+                        result.push(std::mem::replace(
+                            &mut current,
+                            ReadingLine::new(indent_str.clone(), line.style),
+                        ));
                         is_continuation = true;
-                        current = ReadingLine::new(indent_str.clone(), line.style);
                         columns = indent;
+                        if line.text[seg_range.clone()].starts_with(' ') {
+                            seg_range.start + 1
+                        } else {
+                            seg_range.start
+                        }
+                    } else {
+                        seg_range.start
+                    };
+                    let trimmed_range = trimmed_start..seg_end;
+                    let trimmed_width = line.text[trimmed_range.clone()].width();
+                    if columns + trimmed_width <= width {
+                        current.push_from(&line, trimmed_range);
+                        columns += trimmed_width;
+                    } else {
+                        push_wrapped_tokens(
+                            &line,
+                            trimmed_range,
+                            width,
+                            indent,
+                            &indent_str,
+                            &mut result,
+                            &mut current,
+                            &mut columns,
+                            &mut is_continuation,
+                        );
                     }
-                    current.push_from(&line, start + byte..start + byte + grapheme.len());
-                    columns += gn;
                 }
+                seg_start = seg_end;
             }
+        } else {
+            push_wrapped_tokens(
+                &line,
+                0..line.text.len(),
+                width,
+                indent,
+                &indent_str,
+                &mut result,
+                &mut current,
+                &mut columns,
+                &mut is_continuation,
+            );
         }
+
         let min_cols = if is_continuation { indent } else { 0 };
         if !is_continuation || columns > min_cols {
             result.push(current);
@@ -460,22 +542,84 @@ pub(super) fn wrap(lines: Vec<ReadingLine>, width: usize) -> Vec<ReadingLine> {
     result
 }
 
-pub(super) fn label_line(
+#[allow(clippy::too_many_arguments)]
+fn push_wrapped_tokens(
     line: &ReadingLine,
+    slice_range: Range<usize>,
+    width: usize,
+    indent: usize,
+    indent_str: &str,
+    result: &mut Vec<ReadingLine>,
+    current: &mut ReadingLine,
+    columns: &mut usize,
+    is_continuation: &mut bool,
+) {
+    let mut offset = slice_range.start;
+    for token in line.text[slice_range].split_word_bounds() {
+        let start = offset;
+        offset += token.len();
+        let is_ws = token.chars().all(char::is_whitespace);
+        if *is_continuation && *columns == indent && is_ws {
+            continue;
+        }
+        let n = token.width();
+        let min_cols = if *is_continuation { indent } else { 0 };
+        if *columns + n > width && *columns > min_cols {
+            result.push(std::mem::replace(
+                current,
+                ReadingLine::new(indent_str.to_string(), line.style),
+            ));
+            *is_continuation = true;
+            *columns = indent;
+            if is_ws {
+                continue;
+            }
+        }
+        if *columns + n <= width {
+            current.push_from(line, start..offset);
+            *columns += n;
+        } else {
+            for (byte, grapheme) in token.grapheme_indices(true) {
+                let gn = grapheme.width();
+                let min_cols = if *is_continuation { indent } else { 0 };
+                if *columns + gn > width && *columns > min_cols {
+                    result.push(std::mem::replace(
+                        current,
+                        ReadingLine::new(indent_str.to_string(), line.style),
+                    ));
+                    *is_continuation = true;
+                    *columns = indent;
+                }
+                current.push_from(line, start + byte..start + byte + grapheme.len());
+                *columns += gn;
+            }
+        }
+    }
+}
+
+pub(super) fn label_line_with_spans(
+    line: &ReadingLine,
+    lookup_spans: &[(Range<usize>, String)],
     map: &HashMap<String, String>,
+    hint_prefix: &str,
     theme: Theme,
 ) -> Line<'static> {
     let mut spans = vec![];
     let mut offset = 0;
-    for (range, target) in line.lookup_spans() {
+    for (range, target) in lookup_spans {
         spans.extend(line.spans(offset..range.start));
         let token = &line.text[range.clone()];
-        if let Some(label) = map.get(&target) {
+        if let Some(label) = map.get(target) {
             // Replace the first two display columns with the hint (single-letter words use one).
             let graphemes: Vec<_> = token.graphemes(true).collect();
             let count = graphemes.len().min(2);
             let hint = label.chars().take(count).collect::<String>();
-            spans.push(Span::styled(hint, theme.hint_label()));
+            let hint_style = if !hint_prefix.is_empty() && !label.starts_with(hint_prefix) {
+                theme.dim()
+            } else {
+                theme.hint_label()
+            };
+            spans.push(Span::styled(hint, hint_style));
             let replaced_bytes: usize = graphemes[..count].iter().map(|g| g.len()).sum();
             spans.extend(line.spans(range.start + replaced_bytes..range.end));
         } else {
@@ -485,4 +629,13 @@ pub(super) fn label_line(
     }
     spans.extend(line.spans(offset..line.text.len()));
     Line::from(spans)
+}
+
+#[cfg(test)]
+pub(super) fn label_line(
+    line: &ReadingLine,
+    map: &HashMap<String, String>,
+    theme: Theme,
+) -> Line<'static> {
+    label_line_with_spans(line, &line.lookup_spans(), map, "", theme)
 }

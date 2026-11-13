@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.7.0
+
+- Non-interactive CLI output modes (`--print` cleanly formatted text matching
+  `--no-color`, `--json` structured candidates and entry) and managed pack
+  pruning (`--prune-data`, plus automatic retention of active + one rollback pack
+  on downloads/updates).
+- Search expansions: `*` / `?` wildcard queries (with UTF-8-aware NFA matching
+  and linear key-table fast paths for leading wildcard patterns) and zero-hit
+  diacritic-folding plus 2-edit fuzzy fallback for queries of 6+ characters.
+- Terminal clipboard copy (`y` in reading focus via OSC 52 with tmux DCS
+  passthrough and timed footer status confirmation).
+- Reading navigation and folding: fold/unfold archaic/obsolete senses (`h`),
+  direct `#N` sense selection in the outline (`o`), `{` / `}` sense-to-sense
+  stepping, word-boundary targets underlined only for local entries in color
+  mode, and recording confirmed/scrolled studied entries into `Ctrl+Z` / `Ctrl+Y`
+  history on navigation transitions without typing clutter.
+- Layout and panel polish: compact multi-item `Forms:` lines, pre/post-sense
+  relation grouping with compact dot separators for unqualified terms, consecutive
+  identical etymology deduplication, outline cursor preservation and middle
+  truncation preserving `[Etym n]`/POS, `Ctrl+U`/`Ctrl+W` editing in panels,
+  scrolling during `f` follow hints with dimmed non-matching initial letters,
+  Unicode-width Peek cards showing first IPA and dual self/lemma glosses, F2
+  active pack summary and `30×10` error layout priority.
+- Performance & build throughput: clamped Outline mouse wheel scrolling, fast 5ms
+  UI poll while `Peek` loads, `usize` block-ID LRU keys, lazy reading `TextRow`
+  span caching, fast ASCII normalization checks, single-pass `dict-build` entry
+  assembly, and deterministic parallel Zstd-19 block compression.
+- Existing schema-5 dictionaries and configuration files remain compatible; no
+  dictionary rebuild or re-download is required for this update.
+
 ## 0.6.0
 
 - Refresh TLS and Zstd dependencies to versions fixing current RustSec advisories.

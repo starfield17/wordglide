@@ -18,6 +18,7 @@ pub(crate) struct ContentDisplay {
     pub(crate) forms: bool,
     pub(crate) relations: bool,
     pub(crate) etymology: bool,
+    pub(crate) hide_historical: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

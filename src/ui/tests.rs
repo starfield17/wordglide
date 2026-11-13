@@ -107,7 +107,7 @@ fn rich_content_toggles_keep_source_sense_and_fold_to_its_parent() {
         app.reading
             .lines
             .iter()
-            .any(|l| l.text.contains("Derived terms: take off"))
+            .any(|l| l.text.starts_with("   Derived terms:") && l.text.contains("take off"))
     );
     let logical = app
         .reading
@@ -1845,4 +1845,449 @@ fn both_named_navigation_controls_fit_and_click_at_eighty_columns() {
         assert_eq!(app.input, expected);
         paint(&mut app, &mut terminal, &mut pointer);
     }
+}
+
+fn pack_from_json(rows: &[serde_json::Value]) -> (tempfile::TempDir, Dictionary) {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("entries.jsonl");
+    let lines: Vec<_> = rows.iter().map(|v| v.to_string()).collect();
+    std::fs::write(&input, lines.join("\n")).unwrap();
+    let meta = dir.path().join("source.json");
+    std::fs::write(
+        &meta,
+        serde_json::json!({
+            "source": "Synthetic Fixture",
+            "snapshot": "2026-11-13",
+            "licenses": ["CC BY-SA 4.0"]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let out = dir.path().join("pack");
+    build_pack(&input, &meta, &out).unwrap();
+    (dir, Dictionary::open(&out).unwrap())
+}
+
+#[test]
+fn outline_wheel_clamps_to_list_len_peek_loading_polls_fast_and_row_spans_cache() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "take");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+
+    // 1.3: visible rows populate TextRow.spans cache lazily without blanking off-screen rows.
+    let total_rows = app.reading.rows.len();
+    assert!(total_rows > 15);
+    assert!(app.reading.rows[0].spans.is_some());
+    assert!(app.reading.rows[total_rows - 1].spans.is_none());
+
+    // 1.2: peek_loading enables fast polling independently of main app.loading.
+    assert!(!app.loading);
+    assert!(!app.is_polling_fast());
+    app.peek_loading = true;
+    assert!(app.is_polling_fast());
+    app.peek_loading = false;
+
+    // 1.1: Outline mouse wheel scroll down clamps cleanly at outline.len() - 1.
+    stroke(&mut app, KeyCode::Char('o'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    let outline_len = app.reading.outline(&app.panel_query).len();
+    assert!(outline_len > 1);
+    let panel = pointer.panel;
+    let scroll_down = MouseEvent {
+        kind: MouseEventKind::ScrollDown,
+        column: panel.x + 1,
+        row: panel.y + 1,
+        modifiers: KeyModifiers::NONE,
+    };
+    for _ in 0..outline_len + 10 {
+        on_mouse(&mut app, &pointer, scroll_down);
+    }
+    assert_eq!(app.view.panel_row, outline_len - 1);
+}
+
+#[test]
+fn link_list_targets_underline_only_existing_words_and_respect_no_color() {
+    let (_dir, dict) = pack_from_json(&[
+        serde_json::json!({
+            "key":"alpha", "headword":"alpha", "score":100, "source_url":"source",
+            "groups":[{"headword":"alpha","pos":"noun",
+                "forms":[{"form":"beta"},{"form":"missingform"}],
+                "relations":[{"kind":"related","word":"beta"},{"kind":"related","word":"missingrel"}],
+                "senses":[{"glosses":["Primary gloss"],"tags":[]}]
+            }]
+        }),
+        serde_json::json!({
+            "key":"beta", "headword":"beta", "score":90, "source_url":"source",
+            "groups":[{"headword":"beta","pos":"noun","senses":[{"glosses":["Target entry"]}]}]
+        }),
+    ]);
+    let mut app = App::new(dict, "alpha");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    app.view.content.forms = true;
+    app.view.content.relations = true;
+
+    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let buf = terminal.backend().buffer();
+    let mut beta_underlined = false;
+    let mut missing_underlined = false;
+    for y in 0..24u16 {
+        let line: String = (0..100u16).map(|x| buf[(x, y)].symbol()).collect();
+        if let Some(col) = line.find("beta") {
+            let x = line[..col].chars().count() as u16;
+            beta_underlined |= buf[(x, y)].modifier.contains(Modifier::UNDERLINED);
+        }
+        if let Some(col) = line.find("missingrel") {
+            let x = line[..col].chars().count() as u16;
+            missing_underlined |= buf[(x, y)].modifier.contains(Modifier::UNDERLINED);
+        }
+    }
+    assert!(
+        beta_underlined,
+        "existing local target in link list should be underlined"
+    );
+    assert!(
+        !missing_underlined,
+        "nonexistent target should not be underlined"
+    );
+
+    // With color disabled (--no-color), no explicit modifiers or colors are emitted.
+    app.set_plain();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let plain_buf = terminal.backend().buffer();
+    for cell in plain_buf.content() {
+        assert_eq!(cell.fg, ratatui::style::Color::Reset);
+        assert_eq!(cell.bg, ratatui::style::Color::Reset);
+        assert!(
+            !cell.modifier.contains(ratatui::style::Modifier::UNDERLINED),
+            "unexpected UNDERLINED modifier in plain mode: {:?}",
+            cell
+        );
+    }
+}
+
+#[test]
+fn outline_truncation_ctrl_u_w_follow_hint_scroll_dim_and_peek_cjk() {
+    let (_dir, dict) = pack_from_json(&[
+        serde_json::json!({
+            "key":"alpha", "headword":"alpha", "score":100, "source_url":"source",
+            "groups":[
+                {
+                    "headword":"alpha", "pos":"verb", "etymology_number":2,
+                    "ipa":["/ˈæl.fə/"],
+                    "pronunciations":[{"ipa":"/ˈæl.fə/"}],
+                    "senses":[{
+                        "glosses":["An extraordinarily verbose and elongated definition clause intended to overflow narrow outline widths cleanly"],
+                        "examples":[{"text":"Use alpha with beta and beta again"}],
+                        "targets":["beta"],
+                        "tags":[]
+                    }]
+                },
+                {
+                    "headword":"alpha", "pos":"noun",
+                    "senses":[
+                        {"glosses":["Gloss two with beta target"], "targets":["beta"]},
+                        {"glosses":["Gloss three"]},
+                        {"glosses":["Gloss four"]},
+                        {"glosses":["Gloss five"]}
+                    ]
+                }
+            ]
+        }),
+        serde_json::json!({
+            "key":"beta", "headword":"beta", "score":90, "source_url":"source",
+            "groups":[{"headword":"beta","pos":"noun",
+                "ipa":["/ˈbeɪ.tə/"],
+                "pronunciations":[{"ipa":"/ˈbeɪ.tə/"}],
+                "senses":[{"glosses":["中文释义测试超宽换行高度计算准确无误"]}]
+            }]
+        }),
+        serde_json::json!({
+            "key":"betad", "headword":"betad", "score":80, "source_url":"source",
+            "lemmas":["beta"], "preview_lemmas":true,
+            "groups":[{"headword":"betad","pos":"verb",
+                "ipa":["/ˈbeɪ.təd/"],
+                "pronunciations":[{"ipa":"/ˈbeɪ.təd/"}],
+                "senses":[{"glosses":["inflected form of beta"]}]
+            }]
+        }),
+    ]);
+
+    let mut app = App::new(dict, "alpha");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    let mut terminal = Terminal::new(TestBackend::new(72, 16)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+
+    // Outline preserves trailing branch/POS tag with middle truncation, plus Ctrl+W / Ctrl+U editing.
+    stroke(&mut app, KeyCode::Char('o'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    let outline_screen: String = (0..16u16)
+        .map(|y| {
+            (0..72u16)
+                .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(outline_screen.contains("[Etym 2]"), "{outline_screen}");
+    assert!(outline_screen.contains("verb"), "{outline_screen}");
+
+    app.paste("first second");
+    app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    assert_eq!(app.panel_query, "first ");
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    assert!(app.panel_query.is_empty());
+    stroke(&mut app, KeyCode::Esc);
+
+    // Follow hint mode: Down scrolls 1 row keeping picking=true; typing first letter dims mismatches.
+    stroke(&mut app, KeyCode::Char('f'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(app.picking);
+    stroke(&mut app, KeyCode::Down);
+    assert!(app.picking);
+    stroke(&mut app, KeyCode::Char('b'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert_eq!(app.label_input, "b");
+    stroke(&mut app, KeyCode::Esc);
+
+    // Commands overlay also supports Ctrl+W / Ctrl+U.
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    app.paste("outline extra");
+    app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+    assert_eq!(app.panel_query, "outline ");
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    assert!(app.panel_query.is_empty());
+    stroke(&mut app, KeyCode::Esc);
+
+    // Peek card for inflected/CJK entry shows IPA, dual glosses, and renders CJK lines cleanly.
+    app.focus = Focus::Input;
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.paste("betad");
+    settle(&mut app);
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.peek_loading {
+        app.poll();
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(1));
+    }
+    terminal.clear().unwrap();
+    paint(&mut app, &mut terminal, &mut pointer);
+    let buf = terminal.backend().buffer();
+    let peek_text: String = (0..16u16)
+        .map(|y| {
+            let mut line = String::new();
+            let mut x = 0u16;
+            while x < 72 {
+                let sym = buf[(x, y)].symbol();
+                line.push_str(sym);
+                let w = unicode_width::UnicodeWidthStr::width(sym).max(1) as u16;
+                x += w;
+            }
+            line
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(peek_text.contains("/ˈbeɪ.təd/"), "{peek_text}");
+    assert!(peek_text.contains("inflected form of beta"), "{peek_text}");
+    assert!(peek_text.contains("→ beta:"), "{peek_text}");
+    assert!(peek_text.contains("中文释义"), "{peek_text}");
+}
+
+#[test]
+fn appearance_shows_pack_summary_and_30x10_save_errors() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "take");
+    settle(&mut app);
+    app.appearance_status = Some("Not saved: readonly config".into());
+
+    // Normal size shows pack summary inside F2 Settings.
+    let mut wide = Terminal::new(TestBackend::new(80, 24)).unwrap();
+    let mut pointer = Pointer::default();
+    stroke(&mut app, KeyCode::F(2));
+    paint(&mut app, &mut wide, &mut pointer);
+    let screen: String = (0..24u16)
+        .map(|y| {
+            (0..80u16)
+                .map(|x| wide.backend().buffer()[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(screen.contains("Pack:"), "{screen}");
+    assert!(screen.contains("entries"), "{screen}");
+    assert!(screen.contains("Path:"), "{screen}");
+
+    // Minimum 30x10 still displays save error cleanly on line 0 of details.
+    let mut narrow = Terminal::new(TestBackend::new(30, 10)).unwrap();
+    paint(&mut app, &mut narrow, &mut pointer);
+    let narrow_screen: String = (0..10u16)
+        .map(|y| {
+            (0..30u16)
+                .map(|x| narrow.backend().buffer()[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(narrow_screen.contains("Not saved:"), "{narrow_screen}");
+}
+
+#[test]
+fn yank_historical_fold_and_brace_sense_stepping_work_end_to_end() {
+    let (_dir, dict) = pack_from_json(&[serde_json::json!({
+        "key":"gamma", "headword":"gamma", "score":100, "source_url":"source",
+        "groups":[{
+            "headword":"gamma", "pos":"noun",
+            "senses":[
+                {"glosses":["First sense body"]},
+                {"glosses":["Second sense body"]},
+                {"glosses":["Third archaic body"], "tags":["archaic"]}
+            ]
+        }]
+    })]);
+    let mut app = App::new(dict, "gamma");
+    settle(&mut app);
+    app.focus = Focus::Definition;
+    let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+
+    // Yank at top header copies clean headword and sets transient footer notice.
+    stroke(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.take_yank().as_deref(), Some("gamma"));
+    assert!(app.status_notice().is_some_and(|s| s.contains("gamma")));
+
+    // OSC 52 formatting checks standard + tmux DCS passthrough.
+    assert_eq!(
+        super::terminal::encode_osc52("gamma", false),
+        "\x1b]52;c;Z2FtbWE=\x07"
+    );
+    assert_eq!(
+        super::terminal::encode_osc52("gamma", true),
+        "\x1bPtmux;\x1b\x1b]52;c;Z2FtbWE=\x07\x1b\\"
+    );
+
+    // Force scrolling room via small viewport / step down by sense with } and back with {.
+    assert_eq!(app.scroll, 0);
+    stroke(&mut app, KeyCode::Char('}'));
+    assert!(app.scroll > 0);
+    let first_sense_row = app.scroll;
+    stroke(&mut app, KeyCode::Char('y'));
+    assert_eq!(app.take_yank().as_deref(), Some("1. First sense body"));
+    stroke(&mut app, KeyCode::Char('}'));
+    assert!(app.scroll >= first_sense_row);
+    stroke(&mut app, KeyCode::Char('{'));
+    assert!(app.scroll <= first_sense_row);
+
+    // Toggle hide_historical via `h` folds archaic senses and restores them cleanly.
+    stroke(&mut app, KeyCode::Char('h'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(
+        app.reading
+            .lines
+            .iter()
+            .any(|l| l.text.contains("hidden · h shows"))
+    );
+    assert!(
+        !app.reading
+            .lines
+            .iter()
+            .any(|l| l.text.contains("Third archaic body"))
+    );
+
+    stroke(&mut app, KeyCode::Char('h'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(
+        app.reading
+            .lines
+            .iter()
+            .any(|l| l.text.contains("Third archaic body"))
+    );
+}
+
+#[test]
+fn hint_scroll_clears_partial_label_and_overlay_switch_stops_peek_loading() {
+    let (_dir, dict) = dictionary();
+    let mut app = App::new(dict, "take");
+    settle(&mut app);
+    let mut terminal = Terminal::new(TestBackend::new(80, 14)).unwrap();
+    let mut pointer = Pointer::default();
+    paint(&mut app, &mut terminal, &mut pointer);
+
+    // Follow / Layout from Input marks the viewed entry as studied.
+    assert_eq!(app.focus, Focus::Input);
+    stroke(&mut app, KeyCode::F(4));
+    assert_eq!(app.focus, Focus::Definition);
+    stroke(&mut app, KeyCode::Esc);
+    assert_eq!(app.focus, Focus::Input);
+    app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    app.paste("fist");
+    settle(&mut app);
+    stroke(&mut app, KeyCode::Enter);
+    assert_eq!(app.history_len(), 1);
+
+    // Hint mode Up/Down and mouse wheel after typing a partial letter must clear label_input.
+    stroke(&mut app, KeyCode::Char('f'));
+    paint(&mut app, &mut terminal, &mut pointer);
+    assert!(app.picking);
+    stroke(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.label_input, "a");
+    stroke(&mut app, KeyCode::Down);
+    assert!(app.picking);
+    assert!(
+        app.label_input.is_empty(),
+        "Down must clear partial hint label"
+    );
+    stroke(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.label_input, "a");
+    stroke(&mut app, KeyCode::Up);
+    assert!(app.picking);
+    assert!(
+        app.label_input.is_empty(),
+        "Up must clear partial hint label"
+    );
+    stroke(&mut app, KeyCode::Char('a'));
+    assert_eq!(app.label_input, "a");
+    assert!(on_mouse(
+        &mut app,
+        &pointer,
+        MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            ..click(pointer.definition.x + 1, pointer.definition.y + 1)
+        }
+    ));
+    assert!(
+        app.label_input.is_empty(),
+        "Wheel scroll must clear partial hint label"
+    );
+    stroke(&mut app, KeyCode::Esc);
+    assert!(!app.picking);
+
+    // Switching overlay away from Peek while peek_loading is true must stop fast polling.
+    stroke(&mut app, KeyCode::Char(' '));
+    assert_eq!(app.view.overlay, Overlay::Peek);
+    app.peek_loading = true;
+    assert!(app.is_polling_fast());
+    stroke(&mut app, KeyCode::F(2));
+    assert_eq!(app.view.overlay, Overlay::Appearance);
+    assert!(!app.peek_loading);
+    assert!(!app.is_polling_fast());
+
+    stroke(&mut app, KeyCode::F(2));
+    assert_eq!(app.view.overlay, Overlay::None);
+    stroke(&mut app, KeyCode::Char(' '));
+    assert_eq!(app.view.overlay, Overlay::Peek);
+    app.peek_loading = true;
+    stroke(&mut app, KeyCode::F(4));
+    assert_eq!(app.view.overlay, Overlay::None);
+    assert!(!app.peek_loading);
+    assert!(!app.is_polling_fast());
 }

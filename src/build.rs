@@ -5,8 +5,13 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs::{self, File},
-    io::{BufRead, BufReader, Read, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::Path,
+    sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+    thread,
 };
 
 pub(crate) fn checksum(path: &Path) -> Result<String> {
@@ -21,6 +26,93 @@ pub(crate) fn checksum(path: &Path) -> Result<String> {
         hash.update(&buffer[..n]);
     }
     Ok(format!("{:x}", hash.finalize()))
+}
+
+struct PendingBlock {
+    first: usize,
+    count: usize,
+    raw: Vec<u8>,
+}
+
+fn read_encoded(file: &mut File, offset: u64, len: u32) -> Result<Vec<u8>> {
+    file.seek(SeekFrom::Start(offset))?;
+    let mut bytes = vec![0u8; len as usize];
+    file.read_exact(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn new_compressor(dictionary: &[u8]) -> Result<zstd::bulk::Compressor<'_>> {
+    let mut compressor = zstd::bulk::Compressor::with_dictionary(19, dictionary)?;
+    compressor.include_checksum(true)?;
+    compressor.window_log(20)?;
+    Ok(compressor)
+}
+
+fn write_compressed_batch(
+    dictionary: &[u8],
+    workers: usize,
+    batch: &[PendingBlock],
+    body: &mut File,
+    directory: &mut Vec<u8>,
+    body_offset: &mut u64,
+) -> Result<()> {
+    if batch.is_empty() {
+        return Ok(());
+    }
+    let compressed: Vec<Vec<u8>> = if batch.len() == 1 || workers <= 1 {
+        let mut compressor = new_compressor(dictionary)?;
+        batch
+            .iter()
+            .map(|block| entry_codec::compress(&mut compressor, &block.raw))
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        let slots: Vec<Mutex<Option<Result<Vec<u8>>>>> =
+            (0..batch.len()).map(|_| Mutex::new(None)).collect();
+        let next = AtomicUsize::new(0);
+        let worker_count = workers.min(batch.len());
+        thread::scope(|scope| {
+            for _ in 0..worker_count {
+                scope.spawn(|| {
+                    let mut compressor = match new_compressor(dictionary) {
+                        Ok(c) => c,
+                        Err(err) => {
+                            let idx = next.fetch_add(1, Ordering::Relaxed);
+                            if idx < batch.len() {
+                                *slots[idx].lock().unwrap() = Some(Err(err));
+                            }
+                            return;
+                        }
+                    };
+                    loop {
+                        let idx = next.fetch_add(1, Ordering::Relaxed);
+                        if idx >= batch.len() {
+                            break;
+                        }
+                        let res = entry_codec::compress(&mut compressor, &batch[idx].raw);
+                        *slots[idx].lock().unwrap() = Some(res);
+                    }
+                });
+            }
+        });
+        slots
+            .into_iter()
+            .map(|slot| {
+                slot.into_inner()
+                    .unwrap()
+                    .unwrap_or_else(|| Err(anyhow::anyhow!("Missing compressed block result")))
+            })
+            .collect::<Result<Vec<_>>>()?
+    };
+
+    for (block, bytes) in batch.iter().zip(compressed) {
+        directory.extend_from_slice(&body_offset.to_le_bytes());
+        for n in [bytes.len(), block.raw.len(), block.first, block.count] {
+            directory.extend_from_slice(&u32::try_from(n)?.to_le_bytes());
+        }
+        body.write_all(&bytes)?;
+        *body_offset += bytes.len() as u64;
+    }
+    Ok(())
 }
 
 // F1 ← S2 / F4 ← S2: only this builder produces pack bytes; the runtime and the
@@ -43,8 +135,9 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
     }
     fs::create_dir_all(output)?;
     let mut reader = BufReader::new(File::open(input)?);
+    let mut encoded_writer = BufWriter::new(tempfile::tempfile()?);
+    let mut encoded_offset = 0u64;
     let mut records = Vec::new();
-    let mut offset = 0u64;
     let mut line = String::new();
     let mut line_no = 0;
     loop {
@@ -54,8 +147,6 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
             break;
         }
         line_no += 1;
-        let start = offset;
-        offset += length as u64;
         if line.trim().is_empty() {
             continue;
         }
@@ -79,7 +170,9 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
                     && s.examples.iter().all(|e| !e.text.trim().is_empty()))),
             "Invalid senses at line {line_no}"
         );
-        entry_codec::encode(&entry)?;
+        let encoded = entry_codec::encode(&entry)?;
+        let enc_len = u32::try_from(encoded.len())?;
+        encoded_writer.write_all(&encoded)?;
         let parts_of_speech = entry.parts_of_speech();
         records.push((
             Candidate {
@@ -89,9 +182,13 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
                 kind: MatchKind::Prefix,
                 parts_of_speech,
             },
-            start,
+            encoded_offset,
+            enc_len,
         ));
+        encoded_offset += enc_len as u64;
     }
+    drop(reader);
+    let mut encoded_file = encoded_writer.into_inner()?;
     ensure!(
         !records.is_empty() && records.len() < u32::MAX as usize,
         "Invalid entry count"
@@ -101,19 +198,11 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
         records.windows(2).all(|r| r[0].0.key < r[1].0.key),
         "Duplicate dictionary key"
     );
-    fn read_entry(reader: &mut BufReader<File>, offset: u64) -> Result<Entry> {
-        reader.seek(SeekFrom::Start(offset))?;
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        Ok(serde_json::from_str(&line)?)
-    }
     let sample_count = records.len().min(4096);
     let mut samples = Vec::with_capacity(sample_count);
     for i in 0..sample_count {
-        samples.push(entry_codec::encode(&read_entry(
-            &mut reader,
-            records[i * records.len() / sample_count].1,
-        )?)?);
+        let (_, enc_offset, enc_len) = records[i * records.len() / sample_count];
+        samples.push(read_encoded(&mut encoded_file, enc_offset, enc_len)?);
     }
     let dictionary =
         if sample_count >= 256 && samples.iter().map(Vec::len).sum::<usize>() >= 256 * 1024 {
@@ -123,74 +212,67 @@ pub fn build_pack(input: &Path, provenance: &Path, output: &Path) -> Result<()> 
             Vec::new()
         };
     drop(samples);
-    let mut compressor = zstd::bulk::Compressor::with_dictionary(19, &dictionary)?;
-    compressor.include_checksum(true)?;
-    compressor.window_log(20)?;
+
+    let workers = thread::available_parallelism()
+        .map_or(1, usize::from)
+        .clamp(1, 16);
+    let batch_cap = (workers * 2).max(1);
     let mut body = File::create(output.join("entries.bin"))?;
     let mut directory = Vec::new();
-    let mut locations = Vec::new();
+    let mut locations = Vec::with_capacity(records.len() * 8);
     let mut raw = Vec::new();
     let mut first = 0usize;
     let mut block_count = 0u32;
     let mut body_offset = 0u64;
-    fn flush_block(
-        body: &mut File,
-        compressor: &mut zstd::bulk::Compressor<'_>,
-        raw: &mut Vec<u8>,
-        directory: &mut Vec<u8>,
-        first: usize,
-        count: usize,
-        offset: &mut u64,
-    ) -> Result<()> {
-        let bytes = entry_codec::compress(compressor, raw)?;
-        directory.extend_from_slice(&offset.to_le_bytes());
-        for n in [bytes.len(), raw.len(), first, count] {
-            directory.extend_from_slice(&u32::try_from(n)?.to_le_bytes());
-        }
-        body.write_all(&bytes)?;
-        *offset += bytes.len() as u64;
-        raw.clear();
-        Ok(())
-    }
-    for (id, (candidate, offset)) in records.iter().enumerate() {
-        let entry = read_entry(&mut reader, *offset)?;
-        ensure!(
-            entry.key == candidate.key
-                && entry.score == candidate.score
-                && entry.headword == candidate.headword
-                && entry.parts_of_speech() == candidate.parts_of_speech,
-            "Canonical input changed during build"
-        );
-        let bytes = entry_codec::encode(&entry)?;
+    let mut pending_blocks = Vec::with_capacity(batch_cap);
+
+    for (id, (_, enc_offset, enc_len)) in records.iter().enumerate() {
+        let bytes = read_encoded(&mut encoded_file, *enc_offset, *enc_len)?;
         if !raw.is_empty() && raw.len() + bytes.len() > entry_codec::MAX_RAW {
-            flush_block(
-                &mut body,
-                &mut compressor,
-                &mut raw,
-                &mut directory,
+            pending_blocks.push(PendingBlock {
                 first,
-                id - first,
-                &mut body_offset,
-            )?;
+                count: id - first,
+                raw: std::mem::take(&mut raw),
+            });
             first = id;
-            block_count += 1;
+            if pending_blocks.len() >= batch_cap {
+                write_compressed_batch(
+                    &dictionary,
+                    workers,
+                    &pending_blocks,
+                    &mut body,
+                    &mut directory,
+                    &mut body_offset,
+                )?;
+                block_count += u32::try_from(pending_blocks.len())?;
+                pending_blocks.clear();
+            }
         }
-        locations.extend_from_slice(&block_count.to_le_bytes());
+        let current_block_id = block_count + u32::try_from(pending_blocks.len())?;
+        locations.extend_from_slice(&current_block_id.to_le_bytes());
         locations.extend_from_slice(&u32::try_from(raw.len())?.to_le_bytes());
         raw.extend_from_slice(&bytes);
     }
+    drop(encoded_file);
+
     let count = records.len();
-    flush_block(
-        &mut body,
-        &mut compressor,
-        &mut raw,
-        &mut directory,
+    pending_blocks.push(PendingBlock {
         first,
-        count - first,
+        count: count - first,
+        raw,
+    });
+    write_compressed_batch(
+        &dictionary,
+        workers,
+        &pending_blocks,
+        &mut body,
+        &mut directory,
         &mut body_offset,
     )?;
-    block_count += 1;
+    block_count += u32::try_from(pending_blocks.len())?;
+    drop(pending_blocks);
     drop(body);
+
     let mut locator = File::create(output.join("entries.idx"))?;
     locator.write_all(crate::entry_storage::MAGIC)?;
     for n in [

@@ -1,6 +1,6 @@
 //! A fixed set of local actions shared by menus and clickable shortcuts.
 use super::*;
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Action {
@@ -23,6 +23,8 @@ pub(crate) enum Action {
     Forms,
     Relations,
     Etymology,
+    Historical,
+    Yank,
     Back,
     Forward,
     Settings,
@@ -33,7 +35,7 @@ pub(crate) enum Action {
 }
 
 impl Action {
-    pub(crate) const ALL: [Self; 25] = [
+    pub(crate) const ALL: [Self; 27] = [
         Self::Commands,
         Self::Complete,
         Self::NewLookup,
@@ -46,6 +48,7 @@ impl Action {
         Self::Layout,
         Self::Navigation,
         Self::Follow,
+        Self::Yank,
         Self::Top,
         Self::Bottom,
         Self::Examples,
@@ -53,6 +56,7 @@ impl Action {
         Self::Forms,
         Self::Relations,
         Self::Etymology,
+        Self::Historical,
         Self::Back,
         Self::Forward,
         Self::Settings,
@@ -65,6 +69,7 @@ impl Action {
             Self::Forms => "Expand word forms",
             Self::Relations => "Expand source term relations",
             Self::Etymology => "Expand etymology text",
+            Self::Historical => "Hide archaic / obsolete senses",
             Self::Download => "Download dictionary",
             Self::Find => "Find text in this definition",
             Self::Outline => "Definition outline",
@@ -78,6 +83,7 @@ impl Action {
             Self::Prediction => "Accept prediction",
             Self::Peek => "Quick peek candidate card",
             Self::Follow => "Follow a visible word",
+            Self::Yank => "Copy current word or line",
             Self::Top => "Top of definition",
             Self::Bottom => "Bottom of definition",
             Self::Examples => "Expand examples and references",
@@ -95,6 +101,7 @@ impl Action {
             Self::Forms => "v",
             Self::Relations => "r",
             Self::Etymology => "t",
+            Self::Historical => "h",
             Self::Download => "Enter",
             Self::Find => "/",
             Self::Outline => "o",
@@ -108,6 +115,7 @@ impl Action {
             Self::Prediction => "Ctrl+F",
             Self::Peek => "Space",
             Self::Follow => "f",
+            Self::Yank => "y",
             Self::Top => "Home",
             Self::Bottom => "End",
             Self::Examples => "e",
@@ -123,18 +131,23 @@ impl Action {
 }
 
 impl App {
-    pub(crate) fn open_panel(&mut self, panel: Overlay) {
-        if self.view.overlay == Overlay::Find {
-            self.cancel_find();
+    pub(crate) fn dismiss_overlay(&mut self) {
+        match self.view.overlay {
+            Overlay::Find => self.cancel_find(),
+            Overlay::Peek => self.close_peek(),
+            _ => {}
         }
+        self.view.overlay = Overlay::None;
+    }
 
-        self.view.overlay = if self.view.overlay == panel {
-            Overlay::None
-        } else {
-            panel
-        };
+    pub(crate) fn open_panel(&mut self, panel: Overlay) {
+        let was = self.view.overlay;
+        self.dismiss_overlay();
+        if was != panel {
+            self.view.overlay = panel;
+        }
         self.panel_query.clear();
-        self.view.panel_row = if panel == Overlay::Outline {
+        self.view.panel_row = if self.view.overlay == Overlay::Outline {
             self.reading.outline_selection(self.scroll)
         } else {
             0
@@ -148,6 +161,7 @@ impl App {
             }
             Action::Prediction if self.inline_candidate().is_none() => Some("No prediction"),
             Action::Follow
+            | Action::Yank
             | Action::Find
             | Action::Outline
             | Action::Layout
@@ -158,11 +172,14 @@ impl App {
             | Action::Forms
             | Action::Relations
             | Action::Etymology
+            | Action::Historical
                 if self.preview.is_none() || self.loading =>
             {
                 Some("No ready definition")
             }
-            Action::Forms | Action::Relations | Action::Etymology if !self.has_content(action) => {
+            Action::Forms | Action::Relations | Action::Etymology | Action::Historical
+                if !self.has_content(action) =>
+            {
                 Some("No source content")
             }
             Action::Navigation if self.history.is_empty() && self.forward.is_empty() => {
@@ -185,6 +202,7 @@ impl App {
                                 || group.senses.iter().any(|sense| !sense.relations.is_empty())
                         }
                         Action::Etymology => !group.etymology_text.is_empty(),
+                        Action::Historical => group.senses.iter().any(crate::Sense::historical),
                         _ => false,
                     })
                 })
@@ -234,6 +252,13 @@ impl App {
                     "collapsed"
                 }
             }
+            Action::Historical => {
+                if self.view.content.hide_historical {
+                    "hidden"
+                } else {
+                    "shown"
+                }
+            }
             Action::Mouse => {
                 if self.mouse_enabled {
                     "on"
@@ -258,13 +283,17 @@ impl App {
         if self.action_reason(action).is_some() {
             return;
         }
-        self.view.overlay = Overlay::None;
+        if action == Action::Peek && self.view.overlay == Overlay::Peek {
+            self.close_peek();
+            return;
+        }
+        self.dismiss_overlay();
         match action {
             Action::Download => self.start_download(),
             Action::Find => self.find_start(),
             Action::Outline => {
                 self.open_panel(Overlay::Outline);
-                self.focus = Focus::Definition;
+                self.focus_definition();
             }
             Action::Navigation => self.open_panel(Overlay::History),
             Action::Layout => {
@@ -273,15 +302,15 @@ impl App {
                 } else {
                     ReadingLayout::Split
                 };
-                self.focus = Focus::Definition;
+                self.focus_definition();
             }
             Action::Commands => self.open_panel(Overlay::Commands),
             Action::Complete => {
-                self.focus = Focus::Input;
+                self.focus_input();
                 self.cycle_completion(false);
             }
             Action::NewLookup => {
-                self.focus = Focus::Input;
+                self.focus_input();
                 self.input.clear();
                 self.cursor = 0;
                 self.search();
@@ -291,20 +320,21 @@ impl App {
                     self.accept(false);
                 }
                 self.pending_completion.clear();
-                self.focus = if self.focus == Focus::Input {
-                    Focus::Definition
+                if self.focus == Focus::Input {
+                    self.focus_definition();
                 } else {
-                    Focus::Input
-                };
+                    self.focus_input();
+                }
             }
             Action::Accept => self.accept(true),
             Action::Prediction => self.accept_inline(),
             Action::Peek => self.open_peek(),
             Action::Follow => {
-                self.focus = Focus::Definition;
+                self.focus_definition();
                 self.picking = true;
                 self.label_input.clear();
             }
+            Action::Yank => self.yank(),
             Action::Top => self.scroll = 0,
             Action::Bottom => self.scroll = self.max_scroll,
             Action::Examples => self.view.expand_examples = !self.view.expand_examples,
@@ -312,6 +342,9 @@ impl App {
             Action::Forms => self.view.content.forms = !self.view.content.forms,
             Action::Relations => self.view.content.relations = !self.view.content.relations,
             Action::Etymology => self.view.content.etymology = !self.view.content.etymology,
+            Action::Historical => {
+                self.view.content.hide_historical = !self.view.content.hide_historical
+            }
             Action::Back => self.back(),
             Action::Forward => self.forward(),
             Action::Settings => self.open_panel(Overlay::Appearance),
@@ -328,9 +361,8 @@ impl App {
             self.close_peek();
             return;
         }
-        if self.view.overlay == Overlay::Find {
-            self.cancel_find();
-        }
+        self.cancel_picking();
+        self.dismiss_overlay();
         self.panel_query.clear();
         self.view.overlay = Overlay::Peek;
         self.peek_index = self.selected;
@@ -340,6 +372,7 @@ impl App {
         if self.view.overlay == Overlay::Peek {
             self.view.overlay = Overlay::None;
             self.peek_preview = None;
+            self.peek_loading = false;
         }
     }
     pub(crate) fn accept_peek(&mut self, index: usize) {
@@ -351,15 +384,19 @@ impl App {
         self.close_peek();
         if index == self.selected {
             self.accept(true);
-            self.focus = Focus::Definition;
+            self.focus_definition();
         } else {
+            let next_key = self.results[index].key.clone();
+            let next_word = self.results[index].headword.clone();
+            self.capture_studied_origin();
+            self.confirm_studied(Some(&next_key), &next_word);
             self.selected = index;
             self.reading.clear_find();
             self.reading.restore_anchor = None;
             self.scroll = 0;
             self.max_scroll = 0;
             self.error = None;
-            self.picking = false;
+            self.cancel_picking();
             self.focus = Focus::Definition;
             if let Some(preview) = peek_preview
                 && preview.entry.key == self.results[index].key
@@ -395,10 +432,23 @@ impl App {
                 .is_some_and(|p| p.entry.key == candidate.key)
             {
                 self.peek_preview = self.preview.clone();
+                self.peek_loading = false;
+            } else if self.request.is_some() {
+                self.peek_preview = None;
+                self.peek_loading = true;
+                if self
+                    .send_request(Request::Peek(self.generation, index, candidate.clone()))
+                    .is_err()
+                {
+                    self.peek_loading = false;
+                    self.worker_error();
+                }
             } else {
                 self.peek_preview = None;
-                let _ = self.send_request(Request::Peek(self.generation, index, candidate.clone()));
+                self.peek_loading = false;
             }
+        } else {
+            self.peek_loading = false;
         }
     }
     pub(crate) fn panel_paste(&mut self, text: &str) {
@@ -498,6 +548,16 @@ impl App {
                     }
                     self.view.panel_row = 0;
                 }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.panel_query.clear();
+                    self.view.panel_row = 0;
+                }
+                KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let previous =
+                        super::keys::prev_word_boundary(&self.panel_query, self.panel_query.len());
+                    self.panel_query.truncate(previous);
+                    self.view.panel_row = 0;
+                }
                 KeyCode::Char(c)
                     if key.modifiers.is_empty()
                         || key.modifiers == crossterm::event::KeyModifiers::SHIFT =>
@@ -538,6 +598,18 @@ impl App {
                         }
                         self.view.panel_row = 0;
                     }
+                    KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        self.panel_query.clear();
+                        self.view.panel_row = 0;
+                    }
+                    KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        let previous = super::keys::prev_word_boundary(
+                            &self.panel_query,
+                            self.panel_query.len(),
+                        );
+                        self.panel_query.truncate(previous);
+                        self.view.panel_row = 0;
+                    }
                     KeyCode::Char(c)
                         if (key.modifiers.is_empty()
                             || key.modifiers == crossterm::event::KeyModifiers::SHIFT) =>
@@ -566,6 +638,16 @@ impl App {
                             .map_or(0, |(byte, _)| byte);
                         self.panel_query.truncate(start);
                     }
+                    self.find_update();
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.panel_query.clear();
+                    self.find_update();
+                }
+                KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let previous =
+                        super::keys::prev_word_boundary(&self.panel_query, self.panel_query.len());
+                    self.panel_query.truncate(previous);
                     self.find_update();
                 }
                 KeyCode::Down => self.next_match(false),

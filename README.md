@@ -11,11 +11,15 @@ not equivalent to a professionally edited learner's dictionary.
 
 - About 1.35 million entries, with word forms, examples, IPA, etymology and
   synonyms/antonyms where the source provides them.
-- Search as you type, with completion, form lookup and spelling suggestions.
-- Follow words and phrases with keyboard hints or the mouse, then return to
-  your reading position.
-- Find within long entries, search an outline of senses, and expand source content.
+- Search as you type, with completion, form lookup, `*`/`?` wildcards, and
+  zero-hit diacritic-folding and typo fallbacks.
+- Follow words and phrases with keyboard hints or the mouse, copy definitions
+  with `y`, and step back/forward through studied entries.
+- Find within long entries, jump through an outline of senses (`#N`), fold
+  archaic senses, and step between senses.
 - Nine themes, saved reading preferences and adjustable terminal colors.
+- Non-interactive `--print` and `--json` CLI output, plus `--prune-data` to clean
+  older managed downloads.
 - Offline lookup; dictionary downloads happen only when requested.
 
 ## Install and run
@@ -44,10 +48,13 @@ wordglide
 Supported platforms: macOS 11+ and Linux, on Intel/x86_64 and ARM64. Windows is
 not supported. Installed lookup needs neither Python nor a network connection.
 
-For an unpacked dictionary you already have:
+For an unpacked dictionary or one-shot CLI lookup:
 
 ```sh
 wordglide --data PATH_TO_PACK 'take off'
+wordglide --print house
+wordglide --json house
+wordglide --prune-data
 ```
 
 To build from source or try the included sample, see
@@ -62,8 +69,10 @@ To build from source or try the included sample, see
 | Tab | Complete and cycle matches |
 | `f` | Show hints for following words and phrases |
 | Ctrl+Z / Ctrl+Y | Go back / forward |
-| `/` | Find within the displayed definition |
-| `e` / `p` | Expand examples / pronunciation |
+| `/` / `o` | Find within definition / open outline (`#N` jumps to sense N) |
+| `{` / `}` | Step to previous / next sense |
+| `y` | Copy clean definition text to terminal clipboard (OSC 52) |
+| `e` / `p` / `h` | Expand examples / pronunciation / fold archaic senses |
 | `v` / `r` / `t` | Expand forms / relations / etymology |
 | F2 | Settings and dictionary download |
 | Ctrl+G / F1 | Find actions / show help |

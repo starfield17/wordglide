@@ -31,8 +31,80 @@ impl App {
         labels
     }
 
+    pub(super) fn push_history(&mut self, location: Location) {
+        if location.preview.is_none() && normalize(&location.input).is_empty() {
+            return;
+        }
+        if let Some(last) = self.history.back()
+            && last.preview.as_ref().map(|p| p.entry.key.as_str())
+                == location.preview.as_ref().map(|p| p.entry.key.as_str())
+            && normalize(&last.input) == normalize(&location.input)
+            && last.selected == location.selected
+            && last.scroll == location.scroll
+        {
+            return;
+        }
+        self.history.push_back(location);
+        if self.history.len() > HISTORY_LIMIT {
+            self.history.pop_front();
+        }
+    }
+
+    pub(super) fn capture_studied_origin(&mut self) {
+        if self.studied && self.preview.is_some() {
+            self.studied_origin = Some(self.location());
+            self.studied = false;
+        }
+    }
+
+    pub(super) fn confirm_studied(&mut self, next_key: Option<&str>, next_input: &str) {
+        if let Some(origin) = self.studied_origin.take() {
+            let origin_key = origin.preview.as_ref().map(|p| p.entry.key.as_str());
+            let same_entry = match (origin_key, next_key) {
+                (Some(a), Some(b)) => a == b,
+                _ => normalize(&origin.input) == normalize(next_input),
+            };
+            if !same_entry {
+                self.push_history(origin);
+            }
+        }
+        self.studied = true;
+    }
+
+    pub(crate) fn focus_input(&mut self) {
+        self.capture_studied_origin();
+        self.cancel_picking();
+        self.focus = Focus::Input;
+    }
+
+    pub(crate) fn focus_definition(&mut self) {
+        if self.preview.is_some() && !self.loading {
+            let key = self.preview.as_ref().map(|p| p.entry.key.clone());
+            let input = self.input.clone();
+            self.confirm_studied(key.as_deref(), &input);
+        }
+        self.focus = Focus::Definition;
+    }
+
     pub fn back(&mut self) {
-        let Some(old) = self.history.pop_back() else {
+        let origin = self.studied_origin.take().filter(|origin| {
+            let origin_key = origin.preview.as_ref().map(|p| p.entry.key.as_str());
+            let same_entry = if self.loading {
+                normalize(&origin.input) == normalize(&self.input)
+                    && (self.results.is_empty()
+                        || origin_key == self.results.get(self.selected).map(|c| c.key.as_str()))
+            } else {
+                match (
+                    origin_key,
+                    self.preview.as_ref().map(|p| p.entry.key.as_str()),
+                ) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => normalize(&origin.input) == normalize(&self.input),
+                }
+            };
+            !same_entry
+        });
+        let Some(old) = origin.or_else(|| self.history.pop_back()) else {
             return;
         };
         self.forward.push_back(self.location());
@@ -48,10 +120,7 @@ impl App {
         let Some(next) = self.forward.pop_back() else {
             return;
         };
-        self.history.push_back(self.location());
-        if self.history.len() > HISTORY_LIMIT {
-            self.history.pop_front();
-        }
+        self.push_history(self.location());
         self.restore(next);
     }
 
@@ -70,8 +139,10 @@ impl App {
         self.reading.restore_anchor = old.anchor;
         self.reading.restore_scroll = old.scroll;
         self.focus = old.focus;
+        self.studied = old.focus == Focus::Definition && self.preview.is_some();
+        self.studied_origin = None;
         self.error = None;
-        self.picking = false;
+        self.cancel_picking();
         self.labels.clear();
         self.loading = old.loading || (self.preview.is_none() && !self.results.is_empty());
         if self.loading {

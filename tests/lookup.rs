@@ -260,3 +260,92 @@ fn pack_info_reports_metadata_and_verify_counts_entries() {
     assert_eq!(wordglide::verify_pack(&out).unwrap(), 89);
     assert!(wordglide::pack_info(&dir.path().join("missing")).is_err());
 }
+
+#[test]
+fn wildcard_and_zero_hit_fallback_search() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("entries.jsonl");
+    let words = [
+        ("accommodate", 700),
+        ("café", 650),
+        ("déjà vu", 500),
+        ("house", 600),
+        ("mousing", 550),
+        ("résumé", 680),
+        ("cat", 620),
+    ];
+    let rows: Vec<_> = words
+        .iter()
+        .map(|(word, score)| {
+            serde_json::json!({
+                "key": word, "headword": word, "score": score,
+                "groups":[{"headword": word, "pos":"noun", "ipa":[], "senses":[{
+                    "glosses":[format!("gloss for {word}")], "tags":[], "examples":[], "targets":[]
+                }]}],
+                "lemmas": [], "preview_lemmas": false,
+                "source_url": format!("https://en.wiktionary.org/wiki/{word}")
+            })
+            .to_string()
+        })
+        .collect();
+    fs::write(&input, rows.join("\n")).unwrap();
+    let meta = dir.path().join("source.json");
+    fs::write(
+        &meta,
+        serde_json::json!({"source":"fixture","snapshot":"test","licenses":[]}).to_string(),
+    )
+    .unwrap();
+    let out = dir.path().join("pack");
+    build_pack(&input, &meta, &out).unwrap();
+    let mut dict = Dictionary::open(&out).unwrap();
+
+    // Wildcards match whole keys cleanly.
+    let star_ing: Vec<_> = dict
+        .search("*ing")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(star_ing, vec!["mousing"]);
+    let q_mark: Vec<_> = dict
+        .search("c?t")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(q_mark, vec!["cat"]);
+    let prefix_star: Vec<_> = dict
+        .search("ho*")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(prefix_star, vec!["house"]);
+    assert!(dict.search("zzz*").unwrap().is_empty());
+
+    // Zero-hit diacritic folding finds accented entries cleanly.
+    let res: Vec<_> = dict
+        .search("resume")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(res, vec!["résumé"]);
+    let deja: Vec<_> = dict
+        .search("deja")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(deja, vec!["déjà vu"]);
+
+    // Zero-hit >= 6-char 2-edit fallback finds misspelled words, while < 6 chars does not.
+    let accomodate: Vec<_> = dict
+        .search("acommodtae")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(accomodate, vec!["accommodate"]);
+    assert!(dict.search("cxx").unwrap().is_empty());
+}

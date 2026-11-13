@@ -88,6 +88,51 @@ pub(super) fn render_commands(frame: &mut Frame, app: &mut App, pointer: &mut Po
     }
 }
 
+fn clip_width(text: &str, max_width: usize) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    use unicode_width::UnicodeWidthStr;
+    if text.width() <= max_width {
+        return text.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut cols = 0;
+    let budget = max_width.saturating_sub(1);
+    for g in text.graphemes(true) {
+        let w = g.width();
+        if cols + w > budget {
+            break;
+        }
+        out.push_str(g);
+        cols += w;
+    }
+    out.push('…');
+    out
+}
+
+fn fit_outline_row(title: &str, max_width: usize, sections: &[crate::app::Section]) -> String {
+    use unicode_width::UnicodeWidthStr;
+    if title.width() <= max_width {
+        return title.to_string();
+    }
+    if title.starts_with("  ")
+        && let Some(sec) = sections
+            .iter()
+            .find(|s| title.ends_with(&format!(" · {}", s.title)))
+    {
+        let suffix = format!(" · {}", sec.title);
+        let suffix_w = suffix.width();
+        if suffix_w + 6 <= max_width {
+            let prefix_len = title.len() - suffix.len();
+            let prefix = clip_width(&title[..prefix_len], max_width - suffix_w);
+            return format!("{prefix}{suffix}");
+        }
+    }
+    clip_width(title, max_width)
+}
+
 pub(super) fn render_reading_panel(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     if app.view.overlay == Overlay::Find {
         let screen = frame.area();
@@ -166,8 +211,13 @@ pub(super) fn render_reading_panel(frame: &mut Frame, app: &mut App, pointer: &m
             1,
         );
         pointer.navigation_rows.push((Region::from(row), index));
+        let rendered = if outline {
+            fit_outline_row(title, inner.width as usize, &app.reading.sections)
+        } else {
+            clip_width(title, inner.width as usize)
+        };
         frame.render_widget(
-            Paragraph::new(title.clone()).style(if index == app.view.panel_row {
+            Paragraph::new(rendered).style(if index == app.view.panel_row {
                 app.theme.selected()
             } else {
                 app.theme.body()
@@ -185,6 +235,14 @@ pub(super) fn render_reading_panel(frame: &mut Frame, app: &mut App, pointer: &m
         Paragraph::new("↑/↓ select · Enter jump · Esc cancel").style(app.theme.dim()),
         Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1),
     );
+    let prefix_len = if outline { 15 } else { 8 };
+    frame.set_cursor_position((
+        inner.x
+            + prefix_len
+            + unicode_width::UnicodeWidthStr::width(app.panel_query.as_str())
+                .min(inner.width.saturating_sub(prefix_len + 1) as usize) as u16,
+        inner.y,
+    ));
 }
 
 fn shorten_example(text: &str, max_len: usize) -> String {
@@ -201,6 +259,48 @@ fn shorten_example(text: &str, max_len: usize) -> String {
     truncated
 }
 
+struct PeekSnippet<'a> {
+    pos: &'a str,
+    etym_number: Option<u32>,
+    ipa: Option<&'a str>,
+    gloss: String,
+    example: Option<String>,
+}
+
+fn first_sense_snippet(entry: &crate::Entry) -> Option<PeekSnippet<'_>> {
+    let any_ipa = entry
+        .groups
+        .iter()
+        .find_map(|g| g.pronunciations.first())
+        .map(|p| p.ipa.as_str());
+    for group in &entry.groups {
+        let group_ipa = group
+            .pronunciations
+            .first()
+            .map(|p| p.ipa.as_str())
+            .or(any_ipa);
+        for sense in &group.senses {
+            for g in &sense.glosses {
+                if !g.trim().is_empty() {
+                    let example = sense
+                        .examples
+                        .first()
+                        .filter(|ex| !ex.text.trim().is_empty())
+                        .map(|ex| shorten_example(&ex.text, 120));
+                    return Some(PeekSnippet {
+                        pos: &group.pos,
+                        etym_number: group.etymology_number,
+                        ipa: group_ipa,
+                        gloss: g.clone(),
+                        example,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
 pub(super) fn render_peek(frame: &mut Frame, app: &mut App, pointer: &mut Pointer) {
     let Some(candidate) = app.results.get(app.peek_index) else {
         return;
@@ -212,114 +312,131 @@ pub(super) fn render_peek(frame: &mut Frame, app: &mut App, pointer: &mut Pointe
         .map(|s| s.as_str())
         .unwrap_or("");
     let mut etym_number = None;
-    let mut gloss = String::new();
-    let mut example = None;
+    let mut ipa: Option<&str> = None;
+    let mut body_lines: Vec<(String, ratatui::style::Style)> = Vec::new();
 
-    if let Some(preview) = &app.peek_preview {
-        if preview.entry.key == candidate.key {
-            let mut found = false;
-            for group in &preview.entry.groups {
-                for sense in &group.senses {
-                    for g in &sense.glosses {
-                        if !g.trim().is_empty() {
-                            gloss = g.clone();
-                            etym_number = group.etymology_number;
-                            if !group.pos.is_empty() {
-                                pos = &group.pos;
-                            }
-                            if let Some(first_ex) = sense.examples.first()
-                                && !first_ex.text.trim().is_empty()
-                            {
-                                example = Some(shorten_example(&first_ex.text, 120));
-                            }
-                            found = true;
-                            break;
-                        }
-                    }
-                    if found {
-                        break;
-                    }
-                }
-                if found {
-                    break;
-                }
+    if let Some(preview) = &app.peek_preview
+        && preview.entry.key == candidate.key
+    {
+        let own = first_sense_snippet(&preview.entry);
+        let fallback_ipa = preview
+            .entry
+            .groups
+            .iter()
+            .find_map(|g| g.pronunciations.first())
+            .map(|p| p.ipa.as_str());
+        if let Some(ref snippet) = own {
+            etym_number = snippet.etym_number;
+            if !snippet.pos.is_empty() {
+                pos = snippet.pos;
             }
-            if !found {
-                for related in &preview.related {
-                    for group in &related.groups {
-                        for sense in &group.senses {
-                            for g in &sense.glosses {
-                                if !g.trim().is_empty() {
-                                    gloss = g.clone();
-                                    if !group.pos.is_empty() {
-                                        pos = &group.pos;
-                                    }
-                                    if let Some(first_ex) = sense.examples.first()
-                                        && !first_ex.text.trim().is_empty()
-                                    {
-                                        example = Some(shorten_example(&first_ex.text, 120));
-                                    }
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if found {
-                                break;
-                            }
-                        }
-                        if found {
-                            break;
-                        }
-                    }
-                    if found {
-                        break;
-                    }
-                }
-            }
-            if !found && !preview.entry.lemmas.is_empty() {
-                gloss = format!("See {}", preview.entry.lemmas.join(", "));
-            }
+            ipa = snippet.ipa;
         } else {
-            gloss = "Loading definition…".to_string();
+            ipa = fallback_ipa;
+        }
+        let related_match = preview.related.iter().find_map(|rel| {
+            first_sense_snippet(rel).map(|snippet| (rel.headword.as_str(), snippet))
+        });
+
+        if preview.entry.preview_lemmas
+            && let Some((rel_headword, rel)) = related_match
+        {
+            if let Some(ref snippet) = own {
+                body_lines.push((snippet.gloss.clone(), app.theme.dim()));
+                if pos.is_empty() && !rel.pos.is_empty() {
+                    pos = rel.pos;
+                }
+                if ipa.is_none() {
+                    ipa = rel.ipa;
+                }
+            }
+            body_lines.push((format!("→ {rel_headword}: {}", rel.gloss), app.theme.body()));
+            let example = own.and_then(|s| s.example).or(rel.example);
+            if let Some(ex) = example {
+                body_lines.push((String::new(), ratatui::style::Style::default()));
+                body_lines.push((format!("“{ex}”"), app.theme.example()));
+            }
+        } else if let Some(snippet) = own {
+            body_lines.push((format!("1. {}", snippet.gloss), app.theme.body()));
+            if let Some(ex) = snippet.example {
+                body_lines.push((String::new(), ratatui::style::Style::default()));
+                body_lines.push((format!("“{ex}”"), app.theme.example()));
+            }
+        } else if let Some((rel_headword, rel)) = related_match {
+            if pos.is_empty() && !rel.pos.is_empty() {
+                pos = rel.pos;
+            }
+            if ipa.is_none() {
+                ipa = rel.ipa;
+            }
+            body_lines.push((format!("→ {rel_headword}: {}", rel.gloss), app.theme.body()));
+            if let Some(ex) = rel.example {
+                body_lines.push((String::new(), ratatui::style::Style::default()));
+                body_lines.push((format!("“{ex}”"), app.theme.example()));
+            }
+        } else if !preview.entry.lemmas.is_empty() {
+            body_lines.push((
+                format!("1. See {}", preview.entry.lemmas.join(", ")),
+                app.theme.body(),
+            ));
+        } else {
+            body_lines.push(("1. No definition available.".to_string(), app.theme.body()));
         }
     } else {
-        gloss = "Loading definition…".to_string();
-    }
-    if gloss.is_empty() {
-        gloss = "No definition available.".to_string();
+        body_lines.push(("1. Loading definition…".to_string(), app.theme.body()));
     }
 
     let mut lines = Vec::new();
+    let mut header_text = headword.to_string();
     let mut header_spans = vec![Span::styled(headword.to_string(), app.theme.heading())];
     if let Some(n) = etym_number {
-        header_spans.push(Span::styled(format!("  [Etym {n}]"), app.theme.dim()));
+        let part = format!("  [Etym {n}]");
+        header_text.push_str(&part);
+        header_spans.push(Span::styled(part, app.theme.dim()));
     }
     if !pos.is_empty() {
-        header_spans.push(Span::styled(format!("  {pos}"), app.theme.dim()));
+        let part = format!("  {pos}");
+        header_text.push_str(&part);
+        header_spans.push(Span::styled(part, app.theme.dim()));
     }
-    header_spans.push(Span::styled(
-        format!("  ({}/{})", app.peek_index + 1, app.results.len()),
-        app.theme.dim(),
-    ));
+    if let Some(ipa_text) = ipa {
+        let part = format!("  {ipa_text}");
+        header_text.push_str(&part);
+        header_spans.push(Span::styled(part, app.theme.dim()));
+    }
+    let counter = format!("  ({}/{})", app.peek_index + 1, app.results.len());
+    header_text.push_str(&counter);
+    header_spans.push(Span::styled(counter, app.theme.dim()));
+
     lines.push(Line::from(header_spans));
     lines.push(Line::raw(""));
-    lines.push(Line::styled(format!("1. {gloss}"), app.theme.body()));
-    if let Some(ex) = &example {
-        lines.push(Line::raw(""));
-        lines.push(Line::styled(format!("“{ex}”"), app.theme.example()));
+    for (text, style) in &body_lines {
+        if text.is_empty() {
+            lines.push(Line::raw(""));
+        } else {
+            lines.push(Line::styled(text.clone(), *style));
+        }
     }
 
     let screen = frame.area();
     let width = (screen.width.saturating_sub(6)).clamp(36, 68);
-    let inner_width = width.saturating_sub(2) as usize;
-    let non_zero_width = std::num::NonZeroUsize::new(inner_width);
-    let gloss_lines = non_zero_width.map_or(1, |w| (gloss.len() + 3).div_ceil(w.get()).max(1));
-    let example_lines = if let Some(ex) = &example {
-        non_zero_width.map_or(2, |w| 1 + (ex.len() + 2).div_ceil(w.get()).max(1))
-    } else {
-        0
-    };
-    let content_lines = 1 + 1 + gloss_lines + example_lines;
+    let inner_width = (width.saturating_sub(2) as usize).max(1);
+    let mut wrap_input = Vec::with_capacity(body_lines.len() + 2);
+    wrap_input.push(super::reading::ReadingLine::new(
+        header_text,
+        ratatui::style::Style::default(),
+    ));
+    wrap_input.push(super::reading::ReadingLine::new(
+        String::new(),
+        ratatui::style::Style::default(),
+    ));
+    for (text, _) in &body_lines {
+        wrap_input.push(super::reading::ReadingLine::new(
+            text.clone(),
+            ratatui::style::Style::default(),
+        ));
+    }
+    let content_lines = super::reading::wrap(wrap_input, inner_width).len();
     let needed_height = (content_lines + 2) as u16;
     let height = needed_height
         .clamp(6, 12)

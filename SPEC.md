@@ -12,20 +12,27 @@ Done when: type `ho`, see ranked completions and automatic definition preview;
 look up `hosue`, `went`, `better`, and `take off`; follow a word in a definition
 and return to the original query, selection, focus, and scroll position.
 Delivery: Rust `wordglide [QUERY] [--data PACK_DIRECTORY] [--no-color]
-[--no-mouse]`, plus `--info`, `--verify-data`, and explicit `--download-data`; macOS and Linux
+[--no-mouse]`, plus `--print`, `--json`, `--info`, `--verify-data`, `--prune-data`,
+and explicit `--download-data`; macOS and Linux
 terminals only. Windows is out of scope for now: no Windows target is built and
 only POSIX terminals are exercised, so do not add Windows-only paths.
 Appearance delivery also accepts `--theme NAME`, `--theme-background=true|false`,
-and `--truecolor=true|false`; these overrides are session-only.
+and `--truecolor=true|false`; these overrides are session-only. `--print` and
+`--json` emit the top lookup/definition result to stdout cleanly (respecting
+`--no-color`/`NO_COLOR`) and exit without opening the terminal UI.
 Quality: readable source-grounded English definitions, deterministic ranking;
 no Enter to search. Startup loads only compact, prebuilt indexes. Warm-session input-to-draw P95
 target <=50 ms, resident-memory target <=512 MiB on the full data pack.
 Decisions: Wiktionary via raw Wiktextract, prepared packs, fixed wordfreq baseline;
 up to 20 candidates; exact > valid inflection > prefix > one-edit fuzzy fallback.
+When those return 0 candidates, fall back to bounded diacritic/accent folding and,
+for queries of at least 6 characters, two-edit fuzzy matching. Queries containing `*`
+or `?` match normalized keys against `words.fst` as whole-key wildcards ranked by
+fixed score top-20 without changing normal prefix traversal or `F2`.
 Base score: round(100*Zipf) - 2*character count - 100*extra whitespace-separated
 words - 150*hyphen count. Hyphens are U+002D and U+2010 in the normalized key;
 keys and query normalization are unchanged. Scores are fixed at preparation.
-Fuzzy: 3–64 query characters, insertion/deletion/substitution/adjacent swap.
+Fuzzy: 3–64 query characters, insertion/deletion/substitution/adjacent swap (1-edit primary, 2-edit only on >=6-char zero-hit fallback).
 Completion: fish-style Tab common prefix then fixed top-20 cycling; Shift+Tab
 reverses; Esc restores original input; gray prefix suffix accepted with Right at
 input end or Ctrl+F. Prediction keeps the selected strict prefix extension,
@@ -46,16 +53,23 @@ so terminals keep native text selection.
 Reading keys: PageUp/PageDown move by one visible page (one line of overlap),
 Home/End jump to the start/end, and no plain letter scrolls, so `j` and `k` stay
 ordinary input characters. In the definition, `e` toggles compact/full examples
-and references, `p` toggles short/full pronunciation, and `?` opens the key
-help; `F1` opens it from either focus. Hints do not freeze the page: while `f`
-hint mode is active the same keys and the wheel still scroll, and the hints are
-rebuilt for the newly visible lines. Editing shortcuts (Ctrl+U/A/E/F, plus
+and references, `p` toggles short/full pronunciation, `y` copies the current
+selection/sense/headword via terminal OSC 52 clipboard escape (supporting tmux
+passthrough when `$TMUX` is set) without external dependencies, `h` toggles folding
+of `[archaic / obsolete]` senses, and `?` opens the key help; `F1` opens it from
+either focus. Hints do not freeze the page: while `f` hint mode is active `Up`/`Down`,
+the same page keys, and the wheel still scroll, hints rebuild for the newly visible
+lines, and non-matching first-letter hints dim after the first typed hint character.
+Editing shortcuts (Ctrl+U/A/E/F, plus
 Ctrl+W delete-word, Ctrl+K kill-to-end, Ctrl+Left/Right word motion) act only
 while the input has focus; in the definition they are ignored and Ctrl+U does
 not clear the query. Alt+Backspace also deletes a word; Alt+Left/Right step
 history back and forward.
 History: Ctrl+Z steps back through followed words and Ctrl+Y steps forward
-again. A new lookup or follow clears the forward steps so redo never restores a
+again. Explicitly confirmed/studied entries (accepted via Enter or scrolled while
+reading) are also recorded in the session stack before switching away to another
+confirmed lookup; unconfirmed typing keystrokes are never logged. A new lookup or
+follow clears the forward steps so redo never restores a
 replaced state. History is session-only and capped in both directions.
 Distribution: public Wordglide repository; two download types (program and shared
 data). Explicit --data wins, then a non-empty WORDGLIDE_DATA,
@@ -66,7 +80,8 @@ Missing, invalid, or incompatible dictionary data,
 including discovery/receipt errors, opens the terminal session with diagnostic
 and F2/CLI download guidance. Query editing and Settings work without a worker;
 no lookup is queued until a dictionary is active. Explicit path errors never
-silently fall back. --info and --verify-data remain strict non-TUI commands.
+silently fall back. --info, --verify-data, --print, --json, and --prune-data remain
+strict non-TUI commands.
 Normal startup and lookups never use the network.
 Explicit --download-data conflicts with query, --data, --info, and --verify-data.
 It fetches metadata once from the fixed public GitHub latest release endpoint,
@@ -75,9 +90,14 @@ SHA-256, six whitelisted regular archive members, file lengths/checksums,
 schema/ranking, and Dictionary::open must pass before atomic activation.
 Installation uses a user-data advisory lock, immutable version directories,
 and an atomic downloads/current.json pointer. Failure/cancellation cleans its
-staging directory and preserves the previous pointer; historical packs remain.
+staging directory and preserves the previous pointer; successful activation
+retains the active pack and at most one rollback predecessor while best-effort
+pruning older unreferenced download packs. `wordglide --prune-data` also prunes
+stale unreferenced packs under the advisory lock without modifying the active
+or rollback packs.
 The same hash and an openable installed pack are reused without downloading.
-F2 Settings includes a Download / update dictionary command, outside the action
+F2 Settings shows a read-only summary of the active dictionary pack (source
+snapshot, entry count, path, and pending-restart notice) and includes a Download / update dictionary command, outside the action
 palette. Its modal owns keys, paste, and mouse; Esc cancels and Ctrl+C exits.
 It shows stage, target, byte progress, and success/error with return and retry.
 The CLI owns SIGINT handling; library download APIs use caller-owned cooperative
@@ -96,7 +116,7 @@ and POS agreement, reports the entry count and elapsed time, and exits without T
 `wordglide --info` prints pack path, schema, entry count, source snapshot,
 provenance, and licenses.
 Reading: POS/IPA/senses, at most two source examples per sense, no generated
-text; obsolete/archaic senses last. The compact default shows at most two IPA
+text; obsolete/archaic senses last (foldable for the session via `h`). The compact default shows at most two IPA
 variants and the first example of each sense without references; `e` and `p`
 expand them. Wrapped lines hang under their sense marker. The pane title names
 the entry and shows scroll progress. Candidate panes size to their content, and
@@ -105,14 +125,17 @@ above the last good definition. Existing phrases included. Navigation history
 persists as reading preferences and does not affect ranking.
 Long entries: Up/Down and Ctrl+J/K scroll one line in reading focus, including
 follow hints. In input, Up/Down selects candidates; Ctrl+P/N explicitly selects
-candidates from either focus. [/] jumps between source groups, and o opens a searchable source-group and sense outline.
+candidates from either focus. [/] jumps between source groups, `{`/`}` steps
+between senses, and o opens a searchable source-group and sense outline.
 Where source groups contain distinct etymology numbers, group headers and outline
-entries display [Etym n]; opening the outline preselects the active source sense
+entries display [Etym n] without letting long glosses crowd out branch/POS labels;
+opening the outline preselects the active source sense
 or group. Typing/paste filters original glosses and group labels, case-insensitive
-and literal. Keyboard and mouse share source-addressed targets; Esc preserves position.
+and literal, with `#N` matching the Nth sense; Ctrl+U/Ctrl+W edit panel queries and
+Outline/History show a text cursor. Keyboard and mouse share source-addressed targets; Esc preserves position.
 Space in definition focus or Alt+P from any focus opens a transient candidate peek
-card overlay. The peek card previews the selected candidate's headword, POS, first
-gloss, and short example on demand without altering the current query, candidate
+card overlay. The peek card previews the selected candidate's headword, POS, first IPA,
+primary definition (both inflection context and core lemma gloss when applicable), and short example on demand without altering the current query, candidate
 selection, outline, reading scroll position, or session history. Up/Down,
 Ctrl+P/N, Tab/Shift+Tab, and Home/End cycle peek candidates; Enter or a mouse click
 promotes the candidate to full reading; Esc or an outside click dismisses the card
@@ -185,14 +208,22 @@ and related terms keep source categories rather than being relabeled collocation
 Exact duplicate records are removed stably; different labels/notes stay distinct.
 The existing ranking, inverse modern-form lookup, and two-example limit stay fixed.
 Source language_code is recorded as en in preparation provenance.
-Reading v expands forms, r expands relations, and t expands etymology. These
-three controls are session-only, appear in actions/help, and never enter config.
+Reading v expands forms, r expands relations, t expands etymology, and h folds
+[archaic / obsolete] senses. These four controls are session-only, appear in
+actions/help, and never enter config.
 Forms and group relations default to one combined count/shortcut summary; sense
-relations default to count summaries after examples. v/r reveal all source items. Etymology is collapsed by default; p still controls the first
-two versus all structured pronunciation records with original labels/notes.
-Group-level rich content is rendered once across modern/historical partitions.
-Explicit term spans make forms and relation phrases whole lookup targets in
-keyboard hints and mouse hit testing, including wrapped fragments. Absent targets
+relations default to count summaries after examples. v/r reveal all source items:
+multi-item Forms and unqualified group Derived/Related terms compactly join with
+` · ` on wrapped lines while preserving whole-phrase link spans, and group-level
+Derived/Related terms follow the group's senses so primary definitions lead.
+Etymology is collapsed by default, and consecutive identical etymology texts
+within matching etymology-branch groups display a concise cross-reference. p still
+controls the first two versus all structured pronunciation records with original
+labels/notes. Group-level rich content is rendered once across modern/historical partitions.
+Explicit term spans from forms, relations, and non-empty `Sense::targets` make
+source phrases whole lookup targets in keyboard hints and mouse hit testing,
+including wrapped fragments; locally present links in Forms/Relations carry a
+subtle visual cue distinguishing them from absent terms, while absent targets
 remain source text. Reflow/toggles/navigation restore source-addressed positions;
 folded content falls back to its parent sense or group. Find searches visible text.
 
@@ -346,3 +377,9 @@ one shared dictionary and combined checksums; manual dispatch never publishes.
 - 2026-10-11: documented current community English pack authoring and future
   multilingual identity, policy and independent-packaging boundaries. Runtime,
   schema and official release/download interfaces are unchanged by this addition.
+- 2026-11-13: approved bounded historical-pack retention (`--prune-data` and active+rollback
+  retention), F2 active pack summary, non-interactive `--print`/`--json` CLI output,
+  OSC 52 `y` clipboard copy, `*`/`?` whole-key wildcard lookup, archaic/obsolete folding
+  (`h`), `#N` outline sense jump and sense stepping, explicit studied-entry session stack,
+  0-hit diacritic/>=6-char 2-edit fallback, and compact Forms/Derived/Related/etymology/`Sense::targets`
+  reading presentation. Soul invariants S1–S3, N1–N7, F1–F4, and schema 5 remain unchanged.

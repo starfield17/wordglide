@@ -9,7 +9,7 @@ use anyhow::{Context, Result, ensure};
 use std::{
     collections::{HashMap, VecDeque},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -29,8 +29,10 @@ fn pack_open_hint(path: &Path) -> String {
 pub struct Dictionary {
     index: Arc<Index>,
     entries: Entries,
-    cache: HashMap<String, (Arc<Entry>, usize)>,
-    order: VecDeque<String>,
+    path: PathBuf,
+    info: PackInfo,
+    cache: HashMap<usize, (Arc<Entry>, usize)>,
+    order: VecDeque<usize>,
     cache_bytes: usize,
 }
 
@@ -44,6 +46,10 @@ pub(crate) struct Lexicon {
 impl Lexicon {
     pub(crate) fn contains(&self, word: &str) -> bool {
         self.index.exact(&normalize(word)).is_some()
+    }
+
+    pub(crate) fn contains_normalized(&self, key: &str) -> bool {
+        self.index.exact(key).is_some()
     }
 
     pub(crate) fn common_prefix(&self, query: &str) -> Result<Option<String>> {
@@ -94,13 +100,24 @@ impl Dictionary {
             "Data pack candidate count mismatch"
         );
         let entries = Entries::open(path, index.len())?;
+        let info = parse_pack_info(&manifest);
         Ok(Self {
             index,
             entries,
+            path: path.to_path_buf(),
+            info,
             cache: HashMap::new(),
             order: VecDeque::new(),
             cache_bytes: 0,
         })
+    }
+
+    pub fn info(&self) -> &PackInfo {
+        &self.info
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub fn candidate_count(&self) -> usize {
@@ -121,6 +138,23 @@ impl Dictionary {
         let query = normalize(input);
         if query.is_empty() {
             return Ok(vec![]);
+        }
+        if query.contains(['*', '?']) {
+            let mut results = vec![];
+            let mut ids = vec![];
+            if let Some(i) = self.index.exact(&query) {
+                ids.push(i);
+                results.push(self.index.candidate(i, MatchKind::Exact)?);
+            }
+            for i in self
+                .index
+                .wildcard(&query, LIMIT.saturating_sub(results.len()), &ids)?
+            {
+                ids.push(i);
+                results.push(self.index.candidate(i, MatchKind::Fuzzy)?);
+            }
+            results.truncate(LIMIT);
+            return Ok(results);
         }
         let mut results = vec![];
         let mut ids = vec![];
@@ -158,7 +192,19 @@ impl Dictionary {
         }
         if results.len() < LIMIT {
             for i in self.index.fuzzy(&query, LIMIT - results.len(), &ids)? {
+                ids.push(i);
                 results.push(self.index.candidate(i, MatchKind::Fuzzy)?);
+            }
+        }
+        if results.is_empty() {
+            for i in self.index.folded_fallback(&query, LIMIT, &ids)? {
+                ids.push(i);
+                results.push(self.index.candidate(i, MatchKind::Fuzzy)?);
+            }
+            if results.is_empty() {
+                for i in self.index.fuzzy_two(&query, LIMIT, &ids)? {
+                    results.push(self.index.candidate(i, MatchKind::Fuzzy)?);
+                }
             }
         }
         results.truncate(LIMIT);
@@ -166,18 +212,26 @@ impl Dictionary {
     }
 
     fn entry(&mut self, key: &str) -> Result<Arc<Entry>> {
-        if let Some((entry, _)) = self.cache.get(key) {
+        let id = self.index.exact(key).context("Missing dictionary entry")?;
+        self.entry_by_id(id, key)
+    }
+
+    fn entry_by_id(&mut self, id: usize, key: &str) -> Result<Arc<Entry>> {
+        if let Some((entry, _)) = self.cache.get(&id) {
             let entry = Arc::clone(entry);
-            self.order.retain(|k| k != key);
-            self.order.push_back(key.to_string());
+            if self.order.back().copied() != Some(id) {
+                if let Some(pos) = self.order.iter().position(|&k| k == id) {
+                    self.order.remove(pos);
+                }
+                self.order.push_back(id);
+            }
             return Ok(entry);
         }
-        let id = self.index.exact(key).context("Missing dictionary entry")?;
         let decoded = self.entries.read(id, key)?;
         let entry = Arc::new(decoded);
         // Count collection capacities even for empty strings; wire size is no
-        // longer a safe proxy. Include the cache's two key copies and bookkeeping.
-        let bytes = entry.cache_bytes() + key.len() * 2 + 512;
+        // longer a safe proxy. Include cache entry/order bookkeeping.
+        let bytes = entry.cache_bytes() + 512;
         if bytes <= CACHE_BYTES {
             while self.cache_bytes + bytes > CACHE_BYTES {
                 if let Some(old) = self.order.pop_front()
@@ -187,9 +241,8 @@ impl Dictionary {
                 }
             }
             self.cache_bytes += bytes;
-            self.order.push_back(key.to_string());
-            self.cache
-                .insert(key.to_string(), (Arc::clone(&entry), bytes));
+            self.order.push_back(id);
+            self.cache.insert(id, (Arc::clone(&entry), bytes));
         }
         Ok(entry)
     }
@@ -199,8 +252,10 @@ impl Dictionary {
         let mut related = vec![];
         if entry.preview_lemmas {
             for key in &entry.lemmas {
-                if key != &entry.key && self.index.exact(key).is_some() {
-                    related.push(self.entry(key)?);
+                if key != &entry.key
+                    && let Some(id) = self.index.exact(key)
+                {
+                    related.push(self.entry_by_id(id, key)?);
                 }
             }
         }
@@ -220,11 +275,7 @@ pub struct PackInfo {
     pub licenses: Vec<String>,
 }
 
-/// Read pack metadata without opening the SQLite database or the indexes.
-pub fn pack_info(path: &Path) -> Result<PackInfo> {
-    let manifest: Manifest = serde_json::from_slice(
-        &fs::read(path.join("manifest.json")).with_context(|| pack_open_hint(path))?,
-    )?;
+fn parse_pack_info(manifest: &Manifest) -> PackInfo {
     let field = |key: &str| {
         manifest
             .source
@@ -251,7 +302,7 @@ pub fn pack_info(path: &Path) -> Result<PackInfo> {
                 .collect()
         })
         .unwrap_or_default();
-    Ok(PackInfo {
+    PackInfo {
         schema_version: manifest.schema_version,
         candidate_count: manifest.candidate_count,
         snapshot: field("snapshot"),
@@ -259,7 +310,15 @@ pub fn pack_info(path: &Path) -> Result<PackInfo> {
         source_url: field("source_url"),
         input_sha256: field("input_sha256"),
         licenses,
-    })
+    }
+}
+
+/// Read pack metadata without opening the SQLite database or the indexes.
+pub fn pack_info(path: &Path) -> Result<PackInfo> {
+    let manifest: Manifest = serde_json::from_slice(
+        &fs::read(path.join("manifest.json")).with_context(|| pack_open_hint(path))?,
+    )?;
+    Ok(parse_pack_info(&manifest))
 }
 
 /// Explicit full-pack verification. Never called by normal application startup.

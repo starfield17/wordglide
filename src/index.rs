@@ -5,6 +5,7 @@ use levenshtein_automata::LevenshteinAutomatonBuilder;
 use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap},
+    sync::OnceLock,
 };
 
 const MAGIC: &[u8; 8] = b"WGLIDX04";
@@ -24,6 +25,7 @@ pub(crate) struct Index {
     parts_count: usize,
     fst: fst::Map<Vec<u8>>,
     fuzzy: LevenshteinAutomatonBuilder,
+    fuzzy2: OnceLock<LevenshteinAutomatonBuilder>,
 }
 
 impl Index {
@@ -181,6 +183,7 @@ impl Index {
             parts_count,
             fst,
             fuzzy: LevenshteinAutomatonBuilder::new(1, true),
+            fuzzy2: OnceLock::new(),
         })
     }
 
@@ -407,7 +410,125 @@ impl Index {
             return Ok(vec![]);
         }
         let dfa = self.fuzzy.build_dfa(query);
-        let mut stream = self.fst.search(&dfa).into_stream();
+        self.search_automaton(&dfa, limit, excluded)
+    }
+
+    pub(crate) fn fuzzy_two(
+        &self,
+        query: &str,
+        limit: usize,
+        excluded: &[usize],
+    ) -> Result<Vec<usize>> {
+        if !(6..=64).contains(&query.chars().count()) || limit == 0 {
+            return Ok(vec![]);
+        }
+        let builder = self
+            .fuzzy2
+            .get_or_init(|| LevenshteinAutomatonBuilder::new(2, true));
+        let dfa = builder.build_dfa(query);
+        self.search_automaton(&dfa, limit, excluded)
+    }
+
+    pub(crate) fn wildcard(
+        &self,
+        pattern: &str,
+        limit: usize,
+        excluded: &[usize],
+    ) -> Result<Vec<usize>> {
+        if pattern.is_empty() || limit == 0 {
+            return Ok(vec![]);
+        }
+        if !pattern.chars().any(|c| c != '*') {
+            return self.top_in_range(0, self.count, limit, excluded);
+        }
+        if let Some(lit) = pattern.strip_suffix('*')
+            && !lit.contains(['*', '?'])
+        {
+            let (left, right) = self.prefix_range(lit)?;
+            return self.top_in_range(left, right, limit, excluded);
+        }
+        let Some(automaton) = WildcardAutomaton::new(pattern) else {
+            return Ok(vec![]);
+        };
+        if pattern.starts_with(['*', '?']) {
+            return self.scan_wildcard(&automaton, pattern, limit, excluded);
+        }
+        self.search_automaton(&automaton, limit, excluded)
+    }
+
+    pub(crate) fn folded_fallback(
+        &self,
+        query: &str,
+        limit: usize,
+        excluded: &[usize],
+    ) -> Result<Vec<usize>> {
+        let folded_query = crate::normalize::fold_diacritics(query);
+        if folded_query.is_empty() || limit == 0 {
+            return Ok(vec![]);
+        }
+        let query_ascii = query.is_ascii() && query == folded_query;
+        let mut top: BinaryHeap<Reverse<(u8, i32, Reverse<usize>)>> = BinaryHeap::new();
+        for i in 0..self.count {
+            if excluded.contains(&i) {
+                continue;
+            }
+            let key = self.key(i)?;
+            if query_ascii && key.is_ascii() {
+                continue;
+            }
+            let folded_key = if key.is_ascii() {
+                std::borrow::Cow::Borrowed(key)
+            } else {
+                std::borrow::Cow::Owned(crate::normalize::fold_diacritics(key))
+            };
+            let kind = if folded_key.as_ref() == folded_query {
+                2u8
+            } else if folded_key.starts_with(&folded_query) {
+                1u8
+            } else {
+                continue;
+            };
+            top.push(Reverse((kind, self.score(i)?, Reverse(i))));
+            if top.len() > limit {
+                top.pop();
+            }
+        }
+        let mut ranked: Vec<_> = top.into_iter().map(|Reverse(rank)| rank).collect();
+        ranked
+            .sort_unstable_by_key(|&(kind, score, Reverse(i))| (Reverse(kind), Reverse(score), i));
+        Ok(ranked.into_iter().map(|(_, _, Reverse(i))| i).collect())
+    }
+
+    fn top_in_range(
+        &self,
+        left: usize,
+        right: usize,
+        limit: usize,
+        excluded: &[usize],
+    ) -> Result<Vec<usize>> {
+        let mut heap = BinaryHeap::new();
+        self.push_range(&mut heap, left, right)?;
+        let mut results = Vec::with_capacity(limit);
+        while results.len() < limit {
+            let Some((_, Reverse(i), left, right)) = heap.pop() else {
+                break;
+            };
+            if !excluded.contains(&i) {
+                results.push(i);
+            }
+            self.push_range(&mut heap, left, i)?;
+            self.push_range(&mut heap, i + 1, right)?;
+        }
+        Ok(results)
+    }
+
+    fn search_automaton<A: fst::Automaton>(
+        &self,
+        automaton: A,
+        limit: usize,
+        excluded: &[usize],
+    ) -> Result<Vec<usize>> {
+        let mut stream = self.fst.search(automaton).into_stream();
         let mut top: BinaryHeap<Reverse<(i32, Reverse<usize>)>> = BinaryHeap::new();
         while let Some((_, value)) = stream.next() {
             let i = usize::try_from(value)?;
@@ -424,6 +545,135 @@ impl Index {
         Ok(ranked.into_iter().map(|(_, Reverse(i))| i).collect())
     }
 
+    fn scan_wildcard(
+        &self,
+        automaton: &WildcardAutomaton,
+        pattern: &str,
+        limit: usize,
+        excluded: &[usize],
+    ) -> Result<Vec<usize>> {
+        let records = &self.data[HEADER..self.tree_start];
+        let strings = &self.data[self.strings_start..];
+        let mut top: BinaryHeap<Reverse<(i32, Reverse<usize>)>> = BinaryHeap::new();
+        let push = |top: &mut BinaryHeap<Reverse<(i32, Reverse<usize>)>>, score: i32, i: usize| {
+            top.push(Reverse((score, Reverse(i))));
+            if top.len() > limit {
+                top.pop();
+            }
+        };
+        let below_cutoff =
+            |top: &BinaryHeap<Reverse<(i32, Reverse<usize>)>>, score: i32, i: usize| {
+                top.len() == limit
+                    && top
+                        .peek()
+                        .is_some_and(|Reverse(min)| (score, Reverse(i)) <= *min)
+            };
+
+        let suffix = pattern.trim_start_matches('*');
+        if !suffix.is_empty() && !suffix.contains(['*', '?']) {
+            let needle = suffix.as_bytes();
+            let last = needle[needle.len() - 1];
+            for (i, rec) in records.as_chunks::<RECORD>().0.iter().enumerate() {
+                let len = u32::from_le_bytes(rec[4..8].try_into().unwrap()) as usize;
+                if len < needle.len() {
+                    continue;
+                }
+                let score = i32::from_le_bytes(rec[16..20].try_into().unwrap());
+                if below_cutoff(&top, score, i) {
+                    continue;
+                }
+                let offset = u32::from_le_bytes(rec[0..4].try_into().unwrap()) as usize;
+                let end = offset.checked_add(len).context("Corrupt string range")?;
+                let bytes = strings.get(offset..end).context("Corrupt string offset")?;
+                if bytes[len - 1] != last || !bytes.ends_with(needle) {
+                    continue;
+                }
+                std::str::from_utf8(bytes).context("Corrupt index UTF-8")?;
+                if excluded.contains(&i) {
+                    continue;
+                }
+                push(&mut top, score, i);
+            }
+        } else {
+            let trimmed = pattern.trim_matches('*');
+            if !trimmed.is_empty() && !trimmed.contains(['*', '?']) {
+                let needle = trimmed.as_bytes();
+                for (i, rec) in records.as_chunks::<RECORD>().0.iter().enumerate() {
+                    let len = u32::from_le_bytes(rec[4..8].try_into().unwrap()) as usize;
+                    if len < needle.len() {
+                        continue;
+                    }
+                    let score = i32::from_le_bytes(rec[16..20].try_into().unwrap());
+                    if below_cutoff(&top, score, i) {
+                        continue;
+                    }
+                    let offset = u32::from_le_bytes(rec[0..4].try_into().unwrap()) as usize;
+                    let end = offset.checked_add(len).context("Corrupt string range")?;
+                    let bytes = strings.get(offset..end).context("Corrupt string offset")?;
+                    if !contains_bytes(bytes, needle) {
+                        continue;
+                    }
+                    std::str::from_utf8(bytes).context("Corrupt index UTF-8")?;
+                    if excluded.contains(&i) {
+                        continue;
+                    }
+                    push(&mut top, score, i);
+                }
+            } else {
+                let min_bytes: usize = pattern
+                    .chars()
+                    .map(|c| match c {
+                        '*' => 0,
+                        '?' => 1,
+                        _ => c.len_utf8(),
+                    })
+                    .sum();
+                let tail = pattern.rsplit(['*', '?']).next().unwrap_or("").as_bytes();
+                let longest = pattern
+                    .split(['*', '?'])
+                    .max_by_key(|seg| seg.len())
+                    .unwrap_or("")
+                    .as_bytes();
+                let anchor = if longest == tail {
+                    b"".as_slice()
+                } else {
+                    longest
+                };
+                for (i, rec) in records.as_chunks::<RECORD>().0.iter().enumerate() {
+                    let len = u32::from_le_bytes(rec[4..8].try_into().unwrap()) as usize;
+                    if len < min_bytes {
+                        continue;
+                    }
+                    let score = i32::from_le_bytes(rec[16..20].try_into().unwrap());
+                    if below_cutoff(&top, score, i) {
+                        continue;
+                    }
+                    let offset = u32::from_le_bytes(rec[0..4].try_into().unwrap()) as usize;
+                    let end = offset.checked_add(len).context("Corrupt string range")?;
+                    let bytes = strings.get(offset..end).context("Corrupt string offset")?;
+                    if !tail.is_empty() && !bytes.ends_with(tail) {
+                        continue;
+                    }
+                    if !anchor.is_empty() && !contains_bytes(bytes, anchor) {
+                        continue;
+                    }
+                    if !automaton.matches_bytes(bytes) {
+                        continue;
+                    }
+                    std::str::from_utf8(bytes).context("Corrupt index UTF-8")?;
+                    if excluded.contains(&i) {
+                        continue;
+                    }
+                    push(&mut top, score, i);
+                }
+            }
+        }
+
+        let mut ranked: Vec<_> = top.into_iter().map(|Reverse(rank)| rank).collect();
+        ranked.sort_unstable_by_key(|&(score, Reverse(i))| (Reverse(score), i));
+        Ok(ranked.into_iter().map(|(_, Reverse(i))| i).collect())
+    }
+
     pub(crate) fn candidate(&self, i: usize, kind: MatchKind) -> Result<Candidate> {
         Ok(Candidate {
             key: self.key(i)?.into(),
@@ -432,6 +682,208 @@ impl Index {
             kind,
             parts_of_speech: self.parts_of_speech(i)?,
         })
+    }
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if haystack.len() < needle.len() {
+        return false;
+    }
+    let first = needle[0];
+    let limit = haystack.len() - needle.len();
+    let mut i = 0;
+    while i <= limit {
+        let Some(pos) = haystack[i..=limit].iter().position(|&b| b == first) else {
+            return false;
+        };
+        let start = i + pos;
+        if haystack[start..start + needle.len()] == *needle {
+            return true;
+        }
+        i = start + 1;
+    }
+    false
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BitState([u64; 4]);
+
+impl BitState {
+    fn insert(&mut self, index: usize) {
+        self.0[index >> 6] |= 1u64 << (index & 63);
+    }
+
+    fn contains(&self, index: usize) -> bool {
+        (self.0[index >> 6] & (1u64 << (index & 63))) != 0
+    }
+}
+
+enum WildStep {
+    Byte(u8),
+    Utf8Lead {
+        cont1: u8,
+        cont2: u8,
+        cont3: u8,
+        done: u8,
+    },
+    Utf8Cont(u8),
+}
+
+struct WildcardAutomaton {
+    steps: Vec<WildStep>,
+    star_eps: Vec<(usize, usize)>,
+    accept: usize,
+}
+
+impl WildcardAutomaton {
+    fn new(pattern: &str) -> Option<Self> {
+        let mut steps = Vec::new();
+        let mut star_eps = Vec::new();
+        let mut prev_star = false;
+        let mut tokens = 0usize;
+        for ch in pattern.chars() {
+            match ch {
+                '*' => {
+                    if prev_star {
+                        continue;
+                    }
+                    prev_star = true;
+                    tokens += 1;
+                    if tokens > 63 {
+                        return None;
+                    }
+                    let base = steps.len() as u8;
+                    steps.push(WildStep::Utf8Lead {
+                        cont1: base + 3,
+                        cont2: base + 2,
+                        cont3: base + 1,
+                        done: base,
+                    });
+                    steps.push(WildStep::Utf8Cont(base + 2));
+                    steps.push(WildStep::Utf8Cont(base + 3));
+                    steps.push(WildStep::Utf8Cont(base));
+                    star_eps.push((base as usize, (base + 4) as usize));
+                }
+                '?' => {
+                    prev_star = false;
+                    tokens += 1;
+                    if tokens > 63 {
+                        return None;
+                    }
+                    let base = steps.len() as u8;
+                    steps.push(WildStep::Utf8Lead {
+                        cont1: base + 3,
+                        cont2: base + 2,
+                        cont3: base + 1,
+                        done: base + 4,
+                    });
+                    steps.push(WildStep::Utf8Cont(base + 2));
+                    steps.push(WildStep::Utf8Cont(base + 3));
+                    steps.push(WildStep::Utf8Cont(base + 4));
+                }
+                _ => {
+                    prev_star = false;
+                    tokens += 1;
+                    if tokens > 63 {
+                        return None;
+                    }
+                    let mut buf = [0u8; 4];
+                    for &b in ch.encode_utf8(&mut buf).as_bytes() {
+                        steps.push(WildStep::Byte(b));
+                    }
+                }
+            }
+        }
+        let accept = steps.len();
+        if accept >= 256 {
+            return None;
+        }
+        Some(Self {
+            steps,
+            star_eps,
+            accept,
+        })
+    }
+
+    fn close(&self, mut state: BitState) -> BitState {
+        for &(base, after) in &self.star_eps {
+            if state.contains(base) {
+                state.insert(after);
+            }
+        }
+        state
+    }
+
+    fn matches_bytes(&self, bytes: &[u8]) -> bool {
+        use fst::Automaton as _;
+        let mut state = self.start();
+        for &b in bytes {
+            state = self.accept(&state, b);
+            if !self.can_match(&state) {
+                return false;
+            }
+        }
+        self.is_match(&state)
+    }
+}
+
+impl fst::Automaton for WildcardAutomaton {
+    type State = BitState;
+
+    fn start(&self) -> Self::State {
+        let mut state = BitState([0; 4]);
+        state.insert(0);
+        self.close(state)
+    }
+
+    fn is_match(&self, state: &Self::State) -> bool {
+        state.contains(self.accept)
+    }
+
+    fn can_match(&self, state: &Self::State) -> bool {
+        state.0 != [0; 4]
+    }
+
+    fn accept(&self, state: &Self::State, byte: u8) -> Self::State {
+        let mut next = BitState([0; 4]);
+        for (word_idx, mut word) in state.0.into_iter().enumerate() {
+            while word != 0 {
+                let bit = word.trailing_zeros() as usize;
+                word &= word - 1;
+                let idx = word_idx * 64 + bit;
+                let Some(step) = self.steps.get(idx) else {
+                    continue;
+                };
+                match *step {
+                    WildStep::Byte(b) => {
+                        if byte == b {
+                            next.insert(idx + 1);
+                        }
+                    }
+                    WildStep::Utf8Lead {
+                        cont1,
+                        cont2,
+                        cont3,
+                        done,
+                    } => match byte {
+                        0x00..=0x7F => next.insert(done as usize),
+                        0xC2..=0xDF => next.insert(cont1 as usize),
+                        0xE0..=0xEF => next.insert(cont2 as usize),
+                        0xF0..=0xF4 => next.insert(cont3 as usize),
+                        _ => {}
+                    },
+                    WildStep::Utf8Cont(target) => {
+                        if matches!(byte, 0x80..=0xBF) {
+                            next.insert(target as usize);
+                        }
+                    }
+                }
+            }
+        }
+        self.close(next)
     }
 }
 
@@ -505,5 +957,133 @@ mod tests {
         let index = Index::open(bytes, fst).unwrap();
         assert!(index.candidate(0, MatchKind::Exact).is_err());
         assert!(index.verify().is_err());
+    }
+
+    fn glob_match(pattern: &[char], text: &[char]) -> bool {
+        match (pattern.first(), text.first()) {
+            (None, None) => true,
+            (Some('*'), _) => {
+                glob_match(&pattern[1..], text)
+                    || (!text.is_empty() && glob_match(pattern, &text[1..]))
+            }
+            (Some('?'), Some(_)) => glob_match(&pattern[1..], &text[1..]),
+            (Some(&p), Some(&t)) if p == t => glob_match(&pattern[1..], &text[1..]),
+            _ => false,
+        }
+    }
+
+    fn test_index(items: Vec<(&str, i32)>) -> (Vec<Candidate>, Index) {
+        let mut words: Vec<_> = items
+            .into_iter()
+            .map(|(k, score)| Candidate {
+                key: k.into(),
+                headword: k.into(),
+                score,
+                kind: MatchKind::Prefix,
+                parts_of_speech: vec!["noun".into()],
+            })
+            .collect();
+        words.sort_by(|a, b| a.key.cmp(&b.key));
+        let mut builder = fst::MapBuilder::memory();
+        for (i, w) in words.iter().enumerate() {
+            builder.insert(&w.key, i as u64).unwrap();
+        }
+        let index = Index::open(
+            Index::encode(&words).unwrap(),
+            builder.into_inner().unwrap(),
+        )
+        .unwrap();
+        (words, index)
+    }
+
+    #[test]
+    fn wildcard_matches_exhaustive_oracle_and_utf8_scalars() {
+        let (words, index) = test_index(vec![
+            ("accommodate", 50),
+            ("baked", 40),
+            ("baking", 45),
+            ("café", 60),
+            ("cat", 90),
+            ("catnip", 90),
+            ("cot", 70),
+            ("cut", 85),
+            ("déjà vu", 65),
+            ("naïve", 75),
+            ("résumé", 80),
+            ("taking", 95),
+            ("über", 55),
+        ]);
+        for pattern in [
+            "*", "***", "cat*", "*ing", "**ing", "**ak**", "*a?e", "*?*é", "*café", "c?t", "?aïve",
+            "caf?", "caf??", "*é*", "??*g", "absent*",
+        ] {
+            let pat_chars: Vec<_> = pattern.chars().collect();
+            let mut oracle: Vec<_> = (0..words.len())
+                .filter(|&i| {
+                    let text: Vec<_> = words[i].key.chars().collect();
+                    glob_match(&pat_chars, &text)
+                })
+                .collect();
+            oracle.sort_by_key(|&i| (Reverse(words[i].score), i));
+            oracle.truncate(20);
+            assert_eq!(
+                index.wildcard(pattern, 20, &[]).unwrap(),
+                oracle,
+                "pattern {pattern:?}"
+            );
+        }
+        // Bounded limit + exclusions + score ties must match exhaustive oracle on leading '?' and '*'.
+        for pattern in ["*é*", "??*g", "????", "*a*", "c?t", "*"] {
+            let pat_chars: Vec<_> = pattern.chars().collect();
+            let excluded = [1usize, 5usize];
+            let mut oracle: Vec<_> = (0..words.len())
+                .filter(|i| !excluded.contains(i))
+                .filter(|&i| {
+                    let text: Vec<_> = words[i].key.chars().collect();
+                    glob_match(&pat_chars, &text)
+                })
+                .collect();
+            oracle.sort_by_key(|&i| (Reverse(words[i].score), i));
+            oracle.truncate(2);
+            assert_eq!(
+                index.wildcard(pattern, 2, &excluded).unwrap(),
+                oracle,
+                "bounded pattern {pattern:?}"
+            );
+        }
+        // Overly long wildcard patterns (>63 collapsed tokens) never panic.
+        assert!(
+            index
+                .wildcard(&"a?".repeat(40), 20, &[])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn folded_fallback_and_fuzzy_two_respect_thresholds() {
+        let (_words, index) = test_index(vec![
+            ("accommodate", 80),
+            ("café", 70),
+            ("cat", 90),
+            ("déjà vu", 60),
+            ("résumé", 75),
+        ]);
+        let folded = index.folded_fallback("resume", 20, &[]).unwrap();
+        assert_eq!(folded.len(), 1);
+        assert_eq!(index.key(folded[0]).unwrap(), "résumé");
+
+        let deja = index.folded_fallback("deja", 20, &[]).unwrap();
+        assert_eq!(deja.len(), 1);
+        assert_eq!(index.key(deja[0]).unwrap(), "déjà vu");
+
+        // Fewer than 6 chars (< 6) never runs 2-edit fuzzy fallback.
+        assert!(index.fuzzy_two("cxy", 20, &[]).unwrap().is_empty());
+        assert!(index.fuzzy_two("kattz", 20, &[]).unwrap().is_empty());
+
+        // >= 6 chars finds 2-edit match cleanly.
+        let two = index.fuzzy_two("acommodtae", 20, &[]).unwrap();
+        assert_eq!(two.len(), 1);
+        assert_eq!(index.key(two[0]).unwrap(), "accommodate");
     }
 }

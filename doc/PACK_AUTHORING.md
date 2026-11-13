@@ -176,13 +176,15 @@ cp artifacts/authoring-demo/THIRD_PARTY.md artifacts/authoring-demo/my-pack/
 ```
 
 The full verification should report **3 entries**. In the terminal, `take`
-shows the source gloss and `Form: took [past]`. Press Enter for reading focus,
-then `t` to expand etymology. The `Derived terms: take off` link is a complete
-phrase: click it, or press `f` and type its displayed hint. Use Ctrl+Z to return
-to `take`. The synonym `seize` is intentionally absent from this tiny pack, so
-it displays as source content without a dictionary link. Return to input with
-Esc, replace the query with `took`, and check the labeled pronunciation and
-lemma preview. Ctrl+C exits and restores terminal state.
+shows the source gloss and `Form: took [past]` (or compact `Forms:` when
+multiple forms are expanded). Press Enter for reading focus, then `t` to expand
+etymology. The `Derived terms: take off` link is a complete phrase (underlined
+when color is active because `take off` is in the pack): click it, or press `f`
+and type its displayed hint. Use Ctrl+Z to return to `take`. The synonym
+`seize` is intentionally absent from this tiny pack, so it displays before the
+senses as plain source content without an underline or dictionary link. Return
+to input with Esc, replace the query with `took`, and check the labeled
+pronunciation and lemma preview. Ctrl+C exits and restores terminal state.
 
 Use your own input converter instead of these heredocs for a real dictionary.
 The official raw Wiktextract/wordfreq route is documented in

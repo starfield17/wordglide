@@ -1,6 +1,6 @@
 use crate::{
     App, Focus,
-    app::{Action, DownloadState, Overlay},
+    app::{Action, DownloadState, Overlay, TextRow},
 };
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
@@ -89,26 +89,46 @@ impl Pointer {
         self.download_button = Region::default();
     }
 
+    fn push_hit_row(
+        &mut self,
+        inner: Rect,
+        offset: usize,
+        text: &str,
+        spans: &[(std::ops::Range<usize>, String)],
+    ) {
+        let y = inner.y + offset as u16;
+        let mut tokens = Vec::new();
+        for (range, target) in spans {
+            let token = &text[range.clone()];
+            let column = inner.x + text[..range.start].width() as u16;
+            let width = token.width() as u16;
+            // Whitespace and punctuation cannot be looked up; skip allocating
+            // hit targets for them.
+            if width > 0 && token.chars().any(char::is_alphanumeric) {
+                tokens.push(HitToken {
+                    start: column,
+                    end: column + width,
+                    word: target.clone(),
+                });
+            }
+        }
+        self.rows.push(HitRow { y, tokens });
+    }
+
     pub(super) fn record_rows(&mut self, inner: Rect, visible: &[&ReadingLine]) {
         self.rows.clear();
         for (i, line) in visible.iter().enumerate() {
-            let y = inner.y + i as u16;
-            let mut tokens = Vec::new();
-            for (range, target) in line.lookup_spans() {
-                let token = &line.text[range.clone()];
-                let column = inner.x + line.text[..range.start].width() as u16;
-                let width = token.width() as u16;
-                // Whitespace and punctuation cannot be looked up; skip allocating
-                // hit targets for them.
-                if width > 0 && token.chars().any(char::is_alphanumeric) {
-                    tokens.push(HitToken {
-                        start: column,
-                        end: column + width,
-                        word: target,
-                    });
-                }
+            let spans = line.lookup_spans();
+            self.push_hit_row(inner, i, &line.text, &spans);
+        }
+    }
+
+    pub(super) fn record_cached_rows(&mut self, inner: Rect, visible: &[TextRow]) {
+        self.rows.clear();
+        for (i, row) in visible.iter().enumerate() {
+            if let Some(spans) = row.spans.as_deref() {
+                self.push_hit_row(inner, i, &row.text, spans);
             }
-            self.rows.push(HitRow { y, tokens });
         }
     }
 
@@ -232,7 +252,7 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
     }
     if matches!(app.view.overlay, Overlay::Outline | Overlay::History) {
         let count = if app.view.overlay == Overlay::Outline {
-            app.reading.sections.len()
+            app.reading.outline(&app.panel_query).len()
         } else {
             app.navigation_locations().len()
         };
@@ -283,12 +303,11 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
     }
     if pointer.definition.contains(mouse.column, mouse.row) {
         if app.picking {
-            app.picking = false;
-            app.label_input.clear();
+            app.cancel_picking();
             return true;
         }
         if app.focus != Focus::Definition {
-            app.focus = Focus::Definition;
+            app.focus_definition();
             return true;
         }
         if let Some(word) = pointer.definition_word(mouse.column, mouse.row)
@@ -313,9 +332,8 @@ pub(super) fn on_mouse(app: &mut App, pointer: &Pointer, mouse: MouseEvent) -> b
             .map_or(app.cursor, |(_, byte)| *byte);
         let changed = app.focus != Focus::Input || app.cursor != position || app.picking;
         app.cursor = position;
-        app.focus = Focus::Input;
-        app.picking = false;
-        app.label_input.clear();
+        app.focus_input();
+        app.cancel_picking();
         return changed;
     }
     false

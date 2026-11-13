@@ -10,7 +10,10 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use super::pointer::{Pointer, Region};
-use super::reading::{label_line, prepare_reading, reading_lines, stale_style, styled_rows, wrap};
+use super::reading::{
+    ensure_visible_spans, label_line_with_spans, prepare_reading, reading_lines, stale_style,
+    styled_rows, wrap,
+};
 
 fn parts_summary(candidate: &Candidate, budget: usize) -> String {
     let budget = budget.min(10);
@@ -59,6 +62,8 @@ fn parts_summary(candidate: &Candidate, budget: usize) -> String {
 }
 
 pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointer: &mut Pointer) {
+    let query = crate::normalize(&app.input);
+    let ascii_query = query.is_ascii();
     let items: Vec<_> = app
         .results
         .iter()
@@ -84,16 +89,34 @@ pub(super) fn render_candidates(frame: &mut Frame, app: &App, area: Rect, pointe
             if text != c.headword && max > 0 {
                 text.push('…');
             }
-            let query = crate::normalize(&app.input);
             let mut prefix_end = 0;
             if !query.is_empty() && c.key.starts_with(&query) {
-                for (offset, g) in text.grapheme_indices(true) {
-                    let normalized = crate::normalize(&text[..offset + g.len()]);
-                    if query.starts_with(&normalized) {
-                        prefix_end = offset + g.len();
+                if ascii_query
+                    && text.is_ascii()
+                    && !text.starts_with(char::is_whitespace)
+                    && !text.contains("  ")
+                {
+                    let qbytes = query.as_bytes();
+                    let tbytes = text.as_bytes();
+                    let mut matches = 0;
+                    while matches < qbytes.len()
+                        && matches < tbytes.len()
+                        && tbytes[matches].to_ascii_lowercase() == qbytes[matches]
+                    {
+                        matches += 1;
                     }
-                    if normalized == query {
-                        break;
+                    if matches == qbytes.len() {
+                        prefix_end = matches;
+                    }
+                } else {
+                    for (offset, g) in text.grapheme_indices(true) {
+                        let normalized = crate::normalize(&text[..offset + g.len()]);
+                        if query.starts_with(&normalized) {
+                            prefix_end = offset + g.len();
+                        }
+                        if normalized == query {
+                            break;
+                        }
                     }
                 }
             }
@@ -181,8 +204,10 @@ pub(super) fn render_definition(
     };
     app.max_scroll = count.saturating_sub(body.height as usize);
     app.scroll = app.scroll.min(app.max_scroll);
+    let visible_end = (app.scroll + body.height as usize).min(count);
     let mut lines = if app.preview.is_some() {
-        styled_rows(app, app.scroll..app.scroll + body.height as usize)
+        ensure_visible_spans(app, app.scroll..visible_end);
+        styled_rows(app, app.scroll..visible_end)
     } else {
         empty
             .into_iter()
@@ -216,17 +241,32 @@ pub(super) fn render_definition(
     frame.render_widget(block, area);
 
     let visible: Vec<_> = lines.iter().collect();
-    pointer.record_rows(body, &visible);
+    if app.preview.is_some() {
+        pointer.record_cached_rows(body, &app.reading.rows[app.scroll..visible_end]);
+    } else {
+        pointer.record_rows(body, &visible);
+    }
     let mut map = HashMap::new();
     app.labels.clear();
     if app.picking {
-        for line in &visible {
-            for (range, key) in line.lookup_spans() {
-                let token = &line.text[range];
+        use std::borrow::Cow;
+        for (i, line) in visible.iter().enumerate() {
+            let row_spans: Cow<'_, [(std::ops::Range<usize>, String)]> = if app.preview.is_some() {
+                Cow::Borrowed(
+                    app.reading.rows[app.scroll + i]
+                        .spans
+                        .as_deref()
+                        .unwrap_or(&[]),
+                )
+            } else {
+                Cow::Owned(line.lookup_spans())
+            };
+            for (range, key) in row_spans.iter() {
+                let token = &line.text[range.clone()];
                 if token.graphemes(true).take(2).count() == 2
                     && token.graphemes(true).take(2).all(|g| g.width() == 1)
-                    && app.contains(&key)
-                    && !map.contains_key(&key)
+                    && app.contains_normalized(key)
+                    && !map.contains_key(key)
                     && map.len() < 676
                 {
                     let n = map.len();
@@ -236,21 +276,34 @@ pub(super) fn render_definition(
                         (b'a' + (n % 26) as u8) as char
                     );
                     app.labels.push((label.clone(), key.clone()));
-                    map.insert(key, label);
+                    map.insert(key.clone(), label);
                 }
             }
         }
     }
-    let rendered: Vec<Line> = visible
-        .iter()
-        .map(|l| {
-            if app.picking {
-                label_line(l, &map, app.theme)
-            } else {
-                l.rendered()
-            }
-        })
-        .collect();
+    let rendered: Vec<Line> = if app.picking {
+        use std::borrow::Cow;
+        visible
+            .iter()
+            .enumerate()
+            .map(|(i, l)| {
+                let row_spans: Cow<'_, [(std::ops::Range<usize>, String)]> =
+                    if app.preview.is_some() {
+                        Cow::Borrowed(
+                            app.reading.rows[app.scroll + i]
+                                .spans
+                                .as_deref()
+                                .unwrap_or(&[]),
+                        )
+                    } else {
+                        Cow::Owned(l.lookup_spans())
+                    };
+                label_line_with_spans(l, &row_spans, &map, &app.label_input, app.theme)
+            })
+            .collect()
+    } else {
+        visible.iter().map(|l| l.rendered()).collect()
+    };
     frame.render_widget(Paragraph::new(rendered), body);
 }
 

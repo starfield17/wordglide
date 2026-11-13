@@ -140,3 +140,28 @@ TestBackend-render P95 at 3.225 ms. Reading scroll P95 for set/take/run was
 running; these are acceptance measurements, not a paired speedup claim.
 Full verification checked all 1,355,084 entries in 5.0 s. All five existing
 full-pack PTY checks passed, including content expansion and terminal restoration.
+
+## 0.7.0 wildcard, fallback, and rendering updates
+
+Subsequent local native ARM64 macOS benchmark runs against the full
+1,355,084-entry schema-5 pack (warm OS file caches, 50 iterations via
+`dict-bench`) measured:
+
+- Dictionary open: **12.993 ms**; warm lookup+preview P95 for `h` / `ho` /
+  `house` / `hosue` / `went` / `take off`: **0.003–0.100 ms** (first-cache
+  reads **0.827–1.707 ms**).
+- Async input-to-120×40 TestBackend-render P95: **3.836 ms**; reading first-draw
+  `set` / `take` / `run` **0.687–0.776 ms**, scroll P95 **0.110–0.145 ms**,
+  next-match P95 **0.806–0.901 ms**, resize+examples P95 **1.156–1.273 ms**.
+- Fixed 8-query wildcard and zero-hit fallback suite (`*ness`, `t??e`, `un*`,
+  `*able`, `*tion*`, `*a?e`, `resumé`, `acommodtae`): open P50 / P95
+  **5.894 / 6.389 ms**, uncached lookup+preview P50 / P95 **1.973 / 2.598 ms**,
+  and cached P95 **1.277 ms**. Replacing full-FST NFA traversal on
+  leading-`*`/`?` wildcards with a heap-cutoff-pruned key-table byte scan
+  reduced `*ness`, `*able`, `*a?e`, `????`, `?*z`, and `??*z` from ~78–82 ms
+  down to **1.7–2.5 ms** uncached (**1.0–1.6 ms** cached).
+- Supporting runtime/build paths now use integer block-ID block-cache keys
+  (eliminating repeated string key cloning), lazy per-row `Span` resolution
+  while rendering definitions, fast polling during `Peek` loads, single-pass
+  anonymous temp-file assembly, and deterministic parallel Zstd-19 block
+  compression in `dict-build`.

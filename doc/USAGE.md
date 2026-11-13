@@ -16,12 +16,17 @@ Custom packs are opened with `--data`; they are not registered with the download
 
 Managed downloads live under `downloads/packs`, selected by `downloads/current.json`.
 The base directory is `$XDG_DATA_HOME/dict` (or `~/.local/share/dict`) on Linux,
-and `~/Library/Application Support/org.wordglide.dict` on macOS. Retained
-installations consume space until removed manually. For manual official installs,
-extract `english-pack.tar.xz` so `english-pack/` sits beside the executable.
+and `~/Library/Application Support/org.wordglide.dict` on macOS. Updates
+automatically retain the active pack and one rollback pack while pruning older
+managed packs; run `wordglide --prune-data` to remove inactive managed packs at
+any time. For manual official installs, extract `english-pack.tar.xz` so
+`english-pack/` sits beside the executable.
 
-`--no-color` or nonempty `NO_COLOR` disables colors. `--no-mouse` keeps native
-terminal selection. You can also toggle mouse capture through the action menu.
+`--print QUERY` and `--json QUERY` look up a word or phrase non-interactively and
+write either formatted plain/colored entry text or structured candidate/entry JSON
+to stdout without starting the TUI. `--no-color` or nonempty `NO_COLOR` disables
+colors (including `--print` output). `--no-mouse` keeps native terminal selection;
+you can also toggle mouse capture through the action menu.
 
 ## Finding actions
 
@@ -42,17 +47,21 @@ state. Idle sessions redraw only when input, a result, or the terminal size chan
 
 ## Rich source content
 
-Word forms retain their source grammar, dialect and historical labels. Source
-synonyms and antonyms appear under the sense that actually owns them; word-level
-relations keep their source qualifiers. Derived and related terms keep distinct
-source categories. Forms and related phrases are whole keyboard/mouse lookup
-targets when present in the installed dictionary.
+Word forms retain their source grammar, dialect and historical labels; two or more
+forms compact onto `Forms:` lines. Source synonyms and antonyms appear before
+senses when owned by the entry or under each owning sense; derived and related
+terms appear after senses with compact dot separators between consecutive
+unqualified terms. Forms and related phrases are whole keyboard/mouse lookup
+targets underlined only when present in the installed pack and color is enabled.
+Consecutive identical etymology paragraphs merge cleanly while preserving
+`[Etym n]` headers.
 
-In reading focus, **v** expands all forms, **r** expands all term relations, and
-**t** expands the original etymology text. Forms and group relations start as a single source-count summary. Sense relations
-start as count summaries after examples; expand to see the original terms. Etymology starts collapsed.
-These three toggles are session-only; actions and F1 help list them. **p** retains
-its saved short/full IPA preference and now includes source dialect labels/notes.
+In reading focus, **v** expands all forms, **r** expands all term relations,
+**t** expands the original etymology text, and **h** toggles folding archaic and
+obsolete senses. Forms and group relations start as a single source-count
+summary. Sense relations start as count summaries after examples; expand to see
+the original terms. Etymology starts collapsed. **p** retains its saved
+short/full IPA preference and includes source dialect labels/notes.
 Expand/collapse, find, resizing, follow and back/forward preserve source positions.
 Missing source fields stay missing, and related words are not interchangeable
 in every context. No definitions or examples are generated.
@@ -61,18 +70,29 @@ This version supports English dictionaries and offers no language selector.
 
 ## Reading long entries
 
+Search supports `*` (zero or more characters) and `?` (single character)
+wildcards. When a normal lookup produces zero hits, Wordglide automatically
+falls back to diacritic-folded matches and—for queries of 6 or more
+characters—edit-distance-2 fuzzy suggestions.
+
 In reading focus, **/** finds text in the displayed definition. Type or paste a
 literal, case-insensitive query, then Enter to keep it or Esc to restore your
 previous reading position. ↑/↓ in the search prompt moves through matches;
-**n/N** repeats after closing it. Collapsed forms, relations, etymology, examples and IPA are not searched.
-Changing words clears the search. Follow hints temporarily take precedence over
-search highlighting.
+**n/N** repeats after closing it. `Ctrl+U` and `Ctrl+W` edit queries in all
+filter bars (`Ctrl+G`, `Ctrl+R`, `o`, and `/`). Collapsed forms, relations,
+etymology, examples and IPA are not searched. Changing words clears the search.
+Follow hints (`f`) let you scroll with ↑/↓ while active and dim non-matching
+initial letters as you type.
 
-Press **o** for the searchable word / part-of-speech / sense outline, or **[ / ]** for the previous /
-next group. For entries with multiple etymologies, section headers and outline
-rows display `[Etym n]` branches, and opening the outline preselects the active
-sense or group. Type or paste to filter original glosses and group labels;
-Enter or a click jumps to the selected source position, and Esc cancels.
+Press **o** for the searchable word / part-of-speech / sense outline (enter `#N`
+to select sense `N` directly, with long rows middle-truncated to keep `[Etym n]`
+and POS tags visible), **{ / }** to step sense-by-sense, or **[ / ]** for the
+previous / next group. For entries with multiple etymologies, section headers
+and outline rows display `[Etym n]` branches, and opening the outline
+preselects the active sense or group. Type or paste to filter original glosses
+and group labels; Enter or a click jumps to the selected source position, and Esc
+cancels. Press **y** in reading focus to copy clean definition text to your
+terminal clipboard via OSC 52 (with tmux DCS passthrough).
 **↑/↓** scrolls one line in reading focus; **Ctrl+J/K** also scrolls.
 Use Ctrl+P/N or the Space / Alt+P peek card to compare candidates. PageUp/PageDown and the wheel retain their existing behavior.
 **F4** toggles split / focused reading. Focused reading hides candidates while
@@ -80,21 +100,25 @@ you read; returning to input shows them again. Lines are at most 96 columns.
 
 Press **Space** in reading focus (or **Alt+P** from any focus) to open a floating
 **candidate peek card**. The peek card previews the selected candidate's headword,
-part of speech, primary definition, and an example on demand without altering your
-scroll position or session history. Press ↑/↓, Ctrl+P/Ctrl+N, Tab/Shift+Tab,
-or Home/End to compare other candidates. Press **Enter** or click the card to
-read that entry in full; press **Esc** or click outside to dismiss the card and
-return to your reading place.
+first pronunciation IPA, part of speech, primary (and lemma) glosses, and an
+example on demand without altering your scroll position or session history.
+Press ↑/↓, Ctrl+P/Ctrl+N, Tab/Shift+Tab, or Home/End to compare other
+candidates. Press **Enter** or click the card to read that entry in full; press
+**Esc** or click outside to dismiss the card and return to your reading place.
 
 Resizing, expanding examples/IPA, and switching layouts retain your current
 source sense where possible. Collapsing an example you were reading returns to
 its sense. **Ctrl+R** searches this session's existing back/forward locations;
 Enter or a click restores the query, candidate, focus, and reading position.
-It does not save your queries or add a log of everything you type.
+Explicitly studied entries (accepted via Enter or scrolled while reading) are
+added to session history when switching away; unconfirmed typing keystrokes are
+not logged.
 
 ## Settings and appearance
 
-Press **F2** from either pane to open Settings. Use ↑/↓ to choose a
+Press **F2** from either pane to open Settings. The download row also reports the
+active pack snapshot, entry count, and any restart-pending update notice.
+Use ↑/↓ to choose a
 setting and ←/→ or Space to change it; clicking a setting changes it, and the
 wheel selects a setting. Changes apply immediately and save automatically.
 Layout, examples/references, and IPA preferences also save automatically, including
@@ -210,12 +234,15 @@ data and code licenses.
 | `v` in definition | Word forms: collapsed / full |
 | `r` in definition | Term relations: collapsed / full |
 | `t` in definition | Etymology: collapsed / expanded |
+| `h` in definition | Archaic and obsolete senses: folded / full |
+| `y` in definition | Copy clean definition text to terminal clipboard (OSC 52) |
 | `?` in definition / `F1` | Show the key help; Esc closes it |
 | Ctrl+G / F3 | Search and run available actions |
 | / in definition | Find displayed text; Enter keeps, Esc restores position |
 | n / N in definition | Next / previous match |
-| o in definition | Jump through the definition outline (shows [Etym n] branches) |
+| o in definition | Jump through the outline (`#N` selects sense N, shows `[Etym n]`) |
 | Space in definition / Alt+P | Peek candidate card; ↑/↓ compare, Enter read, Esc close |
+| { / } in definition | Previous / next sense |
 | [ / ] in definition | Previous / next word or part-of-speech group |
 | Ctrl+J / Ctrl+K in definition | Scroll one line down / up |
 | F4 | Toggle split / focused reading |

@@ -427,3 +427,64 @@ fn damaged_receipt_can_be_repaired_without_losing_it_on_failure_or_cancellation(
         assert_eq!(crate::verify_pack(&installed.path).unwrap(), 89);
     }
 }
+
+#[test]
+fn install_keeps_active_and_one_rollback_while_pruning_older_packs() {
+    let fixture = pack();
+    let pack_dir = fixture.path().join("pack");
+    let manifest_path = pack_dir.join("manifest.json");
+    let orig_manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+
+    let make_archive = |snapshot: &str| {
+        let copy = tempfile::tempdir().unwrap();
+        for member in [
+            "manifest.json",
+            "entries.bin",
+            "entries.idx",
+            "words.fst",
+            "lexicon.bin",
+        ] {
+            if member == "manifest.json" {
+                let mut m = orig_manifest.clone();
+                m["source"]["snapshot"] = serde_json::json!(snapshot);
+                fs::write(copy.path().join(member), serde_json::to_vec(&m).unwrap()).unwrap();
+            } else {
+                fs::copy(pack_dir.join(member), copy.path().join(member)).unwrap();
+            }
+        }
+        archive(copy.path(), None)
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let s1 = Server::new(make_archive("snap-1"));
+    let i1 = run(root.path(), &s1.source).unwrap();
+    let s2 = Server::new(make_archive("snap-2"));
+    let i2 = run(root.path(), &s2.source).unwrap();
+    let s3 = Server::new(make_archive("snap-3"));
+    let i3 = run(root.path(), &s3.source).unwrap();
+
+    assert!(
+        !i1.path.exists(),
+        "pack 1 should be pruned beyond 1 rollback"
+    );
+    assert!(i2.path.exists(), "pack 2 should remain as 1 rollback");
+    assert!(i3.path.exists(), "pack 3 should remain active");
+    assert_eq!(locate(root.path()).unwrap(), Some(i3.path.clone()));
+
+    // Recreate an unreferenced stale pack directory beside active (i3) and rollback (i2).
+    let stale_dir = root.path().join("packs/pack-stale1");
+    fs::create_dir_all(stale_dir.join("english-pack")).unwrap();
+    fs::copy(
+        pack_dir.join("manifest.json"),
+        stale_dir.join("english-pack/manifest.json"),
+    )
+    .unwrap();
+    assert_eq!(prune_packs_locked(root.path(), 1).unwrap(), 1);
+    assert!(!stale_dir.exists(), "stale pack should be pruned");
+    assert!(
+        i2.path.exists(),
+        "rollback pack must remain with keep_rollbacks=1"
+    );
+    assert!(i3.path.exists(), "active pack must remain");
+}

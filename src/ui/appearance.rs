@@ -60,7 +60,7 @@ pub(super) fn render_download(frame: &mut Frame, app: &App, pointer: &mut Pointe
 pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Pointer) {
     let screen = frame.area();
     let width = screen.width.min(68);
-    let height = screen.height.min(16);
+    let height = screen.height.min(18);
     let area = Rect::new(
         screen.x + (screen.width - width) / 2,
         screen.y + (screen.height - height) / 2,
@@ -163,12 +163,36 @@ pub(super) fn render_appearance(frame: &mut Frame, app: &App, pointer: &mut Poin
         inner.width,
         inner.height.saturating_sub(list_height + 2),
     );
+    let mut detail_lines = vec![
+        Line::styled(status, status_style),
+        Line::styled(message, app.theme.dim()),
+    ];
+    if details.height >= 3 {
+        if let Some(info) = app.pack_info() {
+            detail_lines.push(Line::styled(
+                format!(
+                    "Pack: {} · {} entries · schema v{}",
+                    info.snapshot, info.candidate_count, info.schema_version
+                ),
+                app.theme.dim(),
+            ));
+        } else {
+            detail_lines.push(Line::styled("Pack: none active", app.theme.dim()));
+        }
+        if let Some(pending) = app.pending_pack_update() {
+            detail_lines.push(Line::styled(
+                format!("Update ready: {pending} (restart to switch)"),
+                app.theme.heading(),
+            ));
+        } else if let Some(path) = app.pack_path() {
+            detail_lines.push(Line::styled(
+                format!("Path: {}", path.display()),
+                app.theme.dim(),
+            ));
+        }
+    }
     frame.render_widget(
-        Paragraph::new(vec![
-            Line::styled(status, status_style),
-            Line::styled(message, app.theme.dim()),
-        ])
-        .wrap(Wrap { trim: false }),
+        Paragraph::new(detail_lines).wrap(Wrap { trim: false }),
         details,
     );
     let help = Rect::new(

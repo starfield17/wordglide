@@ -4,7 +4,8 @@ use directories::ProjectDirs;
 use std::path::{Path, PathBuf};
 use wordglide::{
     AppearanceOverrides, Dictionary, PackInfo, RunOptions, ThemePreset, download_data_with_cancel,
-    downloaded_data_path, pack_info, run_with_options, run_without_dictionary, verify_pack,
+    downloaded_data_path, pack_info, prune_downloaded_packs, run_with_options,
+    run_without_dictionary, verify_pack,
 };
 
 #[derive(Parser)]
@@ -19,14 +20,23 @@ struct Args {
     #[arg(long)]
     data: Option<PathBuf>,
     /// Download and verify the latest prepared dictionary, then exit.
-    #[arg(long, conflicts_with_all = ["query", "data", "info", "verify_data"])]
+    #[arg(long, conflicts_with_all = ["query", "data", "info", "verify_data", "prune_data", "print", "json"])]
     download_data: bool,
+    /// Remove stale unreferenced downloaded dictionary packs while retaining the active and rollback packs, then exit.
+    #[arg(long, conflicts_with_all = ["query", "data", "download_data", "info", "verify_data", "print", "json"])]
+    prune_data: bool,
     /// Verify all data checksums, indexes, and database integrity, then exit.
-    #[arg(long, conflicts_with = "query")]
+    #[arg(long, conflicts_with_all = ["query", "print", "json"])]
     verify_data: bool,
     /// Print pack metadata and exit.
-    #[arg(long, conflicts_with_all = ["query", "verify_data"])]
+    #[arg(long, conflicts_with_all = ["query", "verify_data", "print", "json"])]
     info: bool,
+    /// Print the matched dictionary entry cleanly to stdout and exit without opening the TUI.
+    #[arg(long, conflicts_with_all = ["download_data", "prune_data", "info", "verify_data", "json"])]
+    print: bool,
+    /// Print the matched dictionary entry and candidate list as JSON to stdout and exit.
+    #[arg(long, conflicts_with_all = ["download_data", "prune_data", "info", "verify_data", "print"])]
+    json: bool,
     /// Disable colored output.
     #[arg(long)]
     no_color: bool,
@@ -51,6 +61,15 @@ fn main() -> Result<()> {
         // CLI owns the process-lifetime handler, including when output is redirected.
         signal_hook::flag::register(signal_hook::consts::SIGINT, std::sync::Arc::clone(&cancel))?;
         download_data_with_cancel(cancel)?;
+        return Ok(());
+    }
+    if args.prune_data {
+        let removed = prune_downloaded_packs()?;
+        if removed == 0 {
+            println!("No inactive dictionary packs to prune.");
+        } else {
+            println!("Pruned {removed} inactive dictionary pack(s).");
+        }
         return Ok(());
     }
     let executable = std::env::current_exe().context("Cannot locate executable")?;
@@ -84,6 +103,53 @@ fn main() -> Result<()> {
     }
     let dictionary = path.and_then(|path| Dictionary::open(&path).with_context(|| format!(
         "Cannot open dictionary at {}. Check --data / WORDGLIDE_DATA overrides if an older pack is selected.", path.display())));
+    if args.print || args.json {
+        let query = args
+            .query
+            .as_deref()
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .with_context(|| {
+                format!(
+                    "Provide a word or phrase, e.g. wordglide --{} word",
+                    if args.json { "json" } else { "print" }
+                )
+            })?;
+        let mut dictionary = dictionary?;
+        let candidates = dictionary.search(query)?;
+        let first = candidates
+            .first()
+            .with_context(|| format!("No matches for {query:?}"))?;
+        let preview = dictionary.preview(first)?;
+        let result: std::io::Result<()> = (|| {
+            use std::io::Write;
+            let mut out = std::io::stdout().lock();
+            if args.json {
+                let payload = serde_json::json!({
+                    "query": query,
+                    "match": first,
+                    "entry": &*preview.entry,
+                    "related": preview.related.iter().map(|e| &**e).collect::<Vec<_>>(),
+                    "candidates": &candidates,
+                });
+                serde_json::to_writer_pretty(&mut out, &payload).map_err(|e| {
+                    std::io::Error::new(e.io_error_kind().unwrap_or(std::io::ErrorKind::Other), e)
+                })?;
+                writeln!(out)
+            } else {
+                use std::io::IsTerminal;
+                let color = color_enabled(args.no_color) && std::io::stdout().is_terminal();
+                let rendered = wordglide::format_preview(&preview, color);
+                out.write_all(rendered.as_bytes())
+            }
+        })();
+        if let Err(err) = result
+            && err.kind() != std::io::ErrorKind::BrokenPipe
+        {
+            return Err(err.into());
+        }
+        return Ok(());
+    }
     let options = RunOptions {
         color: color_enabled(args.no_color),
         mouse: !args.no_mouse,

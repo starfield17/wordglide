@@ -266,7 +266,11 @@ fn run_session(mut app: App, options: RunOptions) -> Result<()> {
             terminal.draw(|frame| render(frame, &mut app, &mut pointer))?;
             dirty = false;
         }
-        if event::poll(Duration::from_millis(if app.loading { 5 } else { 100 }))? {
+        if event::poll(Duration::from_millis(if app.is_polling_fast() {
+            5
+        } else {
+            100
+        }))? {
             let before = app.appearance();
             let reading_before = app.reading_preferences();
             let mouse_before = app.mouse_enabled;
@@ -308,9 +312,61 @@ fn run_session(mut app: App, options: RunOptions) -> Result<()> {
                 dirty = true;
             }
         }
+        if let Some(text) = app.take_yank() {
+            let seq = encode_osc52(
+                &text,
+                std::env::var_os("TMUX").is_some_and(|value| !value.is_empty()),
+            );
+            let mut out = io::stdout().lock();
+            out.write_all(seq.as_bytes())?;
+            out.flush()?;
+        }
     }
     terminal.show_cursor()?;
     Ok(())
+}
+
+const OSC52_MAX_BYTES: usize = 32 * 1024;
+
+pub(super) fn encode_base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as usize;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(n >> 18) & 0x3f] as char);
+        out.push(TABLE[(n >> 12) & 0x3f] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) & 0x3f] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n & 0x3f] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+pub(super) fn encode_osc52(text: &str, in_tmux: bool) -> String {
+    let mut capped = text;
+    if capped.len() > OSC52_MAX_BYTES {
+        let mut end = OSC52_MAX_BYTES;
+        while !capped.is_char_boundary(end) {
+            end -= 1;
+        }
+        capped = &capped[..end];
+    }
+    let payload = encode_base64(capped.as_bytes());
+    if in_tmux {
+        format!("\x1bPtmux;\x1b\x1b]52;c;{payload}\x07\x1b\\")
+    } else {
+        format!("\x1b]52;c;{payload}\x07")
+    }
 }
 
 pub(super) fn finish_download(app: &mut App, result: Result<crate::download::Installed, String>) {
@@ -319,6 +375,9 @@ pub(super) fn finish_download(app: &mut App, result: Result<crate::download::Ins
     app.download.message = match result {
         Ok(installed) => {
             let status = if app.has_dictionary() {
+                if !installed.already_current {
+                    app.set_pending_pack_update(installed.snapshot.clone());
+                }
                 "Restart Wordglide to use this dictionary."
             } else {
                 match Dictionary::open(&installed.path) {
